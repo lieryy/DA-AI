@@ -126,7 +126,7 @@ st.markdown("# Synthetic & Manipulated Image Detector")
 st.markdown("Upload an image to check for **AI Generation** and **Photoshop Manipulation**.")
 
 # --- File Uploader and Button setup (in a single column for clean layout) ---
-uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "tiff", "tif"])
 
 # Use Streamlit's flow control: button press triggers the main logic
 if uploaded_file is not None:
