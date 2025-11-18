@@ -121,12 +121,12 @@ def predict_image(uploaded_file, model_raw, model_ela):
 
 # --- 5. STREAMLIT INTERFACE ---
 
-st.title("Synthetic & Manipulated Image Detector")
+st.title("Deepfake & Manipulation Detector")
+st.markdown("# Synthetic & Manipulated Image Detector")
 st.markdown("Upload an image to check for **AI Generation** and **Photoshop Manipulation**.")
-st.caption("Note: This app uses cached TensorFlow models for speed.")
 
 # --- File Uploader and Button setup (in a single column for clean layout) ---
-uploaded_file = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png"])
 
 # Use Streamlit's flow control: button press triggers the main logic
 if uploaded_file is not None:
@@ -155,7 +155,7 @@ if uploaded_file is not None:
                     st.subheader("1. AI Generation Scan (Raw Image)")
                     st.image(original_pil, caption="Original Image", use_column_width=True)
                     st.markdown("---")
-                    st.markdown("**Verdict:**")
+                    st.markdown("Verdict:")
                     st.code(verdict_raw, language=None)
 
                 # Column 2: Manipulation Scan
@@ -168,5 +168,5 @@ if uploaded_file is not None:
                         st.warning("ELA Map generation failed.")
                         
                     st.markdown("---")
-                    st.markdown("**Verdict:**")
+                    st.markdown("Verdict:")
                     st.code(verdict_ela, language=None)
