@@ -17,8 +17,12 @@ page_bg_img = """
 }
 
 /* 2. FILE UPLOADER RESIZING */
+[data-testid="stFileUploader"] {
+    height: 450px !important; /* Forces the outer wrapper height */
+}
+
 [data-testid="stFileUploadDropzone"] {
-     min-height: 400px !important; /* FORCED vertical size */
+     height: 400px !important; /* FORCED vertical size */
      padding: 40px !important; /* FORCED internal space */
      border-width: 2px;
      border-style: dashed;
