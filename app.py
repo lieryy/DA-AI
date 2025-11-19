@@ -6,57 +6,59 @@ import io
 
 # --- SESSION STATE INITIALIZATION ---
 if 'page' not in st.session_state:
-    st.session_state['page'] = "Welcome"
+     st.session_state['page'] = "Welcome"
 
 # --- CSS FOR WHITE BACKGROUND (Light Theme Default) AND LARGE UPLOADER ---
 page_bg_img = """
 <style>
 /* 1. Ensure the header/top bar is transparent */
 [data-testid="stHeader"] {
-     background-color: transparent !important;
+     background-color: transparent !important;
 }
 
-/* 2. FILE UPLOADER RESIZING (Added !important flags to force the size) */
+/* 2. FILE UPLOADER RESIZING */
 [data-testid="stFileUploadDropzone"] {
-     min-height: 400px !important; /* FORCED vertical size */
-     padding: 40px !important;    /* FORCED internal space */
-     border-width: 3px; 
-     border-style: dashed;
+     min-height: 400px !important; /* FORCED vertical size */
+     padding: 40px !important; /* FORCED internal space */
+     border-width: 3px;
+     border-style: dashed;
 }
 
 /* Increase the font size for text inside the drop zone (e.g., "Drag and drop...") */
 [data-testid="stFileUploadDropzone"] p {
-     font-size: 1.4em !important; 
+     font-size: 1.4em !important;
 }
 
 /* Increase the font size for the "Browse files" button */
 [data-testid="baseButton-secondary"] {
-     font-size: 1.1em;
-     padding: 10px 20px;
+     font-size: 1.1em;
+     padding: 10px 20px;
 }
 </style>
 """
 
 # --- 1. CONFIGURATION & SETUP ---
-st.set_page_config(page_title="Synthetic & Manipulated Image Detector", layout="wide") 
-st.markdown(page_bg_img, unsafe_allow_html=True) # Inject the CSS
+st.set_page_config(
+    page_title="Synthetic & Manipulated Image Detector", layout="wide")
+st.markdown(page_bg_img, unsafe_allow_html=True)  # Inject the CSS
 
 # Hard-coded thresholds
 THRESHOLD_RAW = 0.021722
-THRESHOLD_ELA = 0.001001 
+THRESHOLD_ELA = 0.001001
 
 IMG_HEIGHT, IMG_WIDTH = 128, 128
 
 
-# --- 2. MODEL LOADING  ---
+# --- 2. MODEL LOADING  ---
 
 @st.cache_resource
 def load_models():
-    """Loads the models and caches them to prevent reloading on every script rerun."""
+     """Loads the models and caches them to prevent reloading on every script rerun."""
     try:
         model_raw = tf.keras.models.load_model("model_raw.h5")
         model_ela = tf.keras.models.load_model("model_ela.h5")
         return model_raw, model_ela
+    
     except Exception as e:
         st.error(f"Error loading models. Please ensure 'model_raw.h5' and 'model_ela.h5' are present. Error: {e}")
         return None, None
@@ -90,93 +92,83 @@ def preprocess_for_model(image_pil):
     img_batch = np.expand_dims(img_array, axis=0)
     return img_batch
 
-# --- NEW FUNCTION ---
-def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
-    """Final Verdict"""
-    
-    is_raw_anomaly = error_raw > threshold_raw
-    is_ela_anomaly = error_ela > threshold_ela
-    
-    if is_raw_anomaly and is_ela_anomaly:
-        return "HIGH RISK: Synthetic AND Manipulated"
-    elif is_raw_anomaly or is_ela_anomaly:
-        # One test failed (either AI or manual edit)
-        return "MEDIUM RISK: Possible Forgery Detected"
-    else:
-        # Both tests passed
-        return "LOW RISK: Image Appears Authentic"
-
-# --- 4. MAIN PREDICTION FUNCTION  ---
+# --- 4. MAIN PREDICTION FUNCTION (RESTORED TO OLD LOGIC)  ---
 def predict_image(uploaded_file, model_raw, model_ela):
     image_bytes = uploaded_file.read()
     image_stream = io.BytesIO(image_bytes)
     original_pil = Image.open(image_stream).convert('RGB')
     input_raw = preprocess_for_model(original_pil)
-    
+
+ # A. RAW ANALYSIS
     if model_raw:
         reconstructed_raw = model_raw.predict(input_raw, verbose=0)
         error_raw = np.mean(np.square(input_raw - reconstructed_raw))
     else:
         error_raw = 0.0
-        
+ 
+    if error_raw > THRESHOLD_RAW:
+        verdict_raw = f"ANOMALY (Possible AI)\nError: {error_raw:.5f}"
+    else:
+        verdict_raw = f"REAL (Natural Pixels)\nError: {error_raw:.5f}"
+ 
+     # B. ELA ANALYSIS
     image_stream.seek(0)
     ela_pil = calculate_ela(image_stream)
-    
+
     if ela_pil is None:
-        error_ela = 1.0
-    else:
-        input_ela = preprocess_for_model(ela_pil)
-    
+        # Return partial results if ELA fails
+        return original_pil, verdict_raw, None, "ERROR: ELA calculation failed."
+
+    input_ela = preprocess_for_model(ela_pil)
+
     if model_ela:
         reconstructed_ela = model_ela.predict(input_ela, verbose=0)
         error_ela = np.mean(np.square(input_ela - reconstructed_ela))
     else:
         error_ela = 0.0
-     
-    # C. COMBINED VERDICT
-    overall_verdict = get_overall_verdict(
-        error_raw, error_ela, THRESHOLD_RAW, THRESHOLD_ELA
-    )
-    
-    # Ensure you return the new variable
-    return original_pil, overall_verdict # <--- UPDATED RETURN
+ 
+    if error_ela > THRESHOLD_ELA:
+        verdict_ela = f"ANOMALY (Manipulated)\nError: {error_ela:.5f}"
+    else:
+        verdict_ela = f"REAL (Consistent Compression)\nError: {error_ela:.5f}"
+
+    # RESTORED: Returns the two separate verdicts and the ELA image
+    return original_pil, verdict_raw, ela_pil, verdict_ela 
 
 
-
-# --- 5. STREAMLIT INTERFACE  ---
+# --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
 st.title("Synthetic & Manipulated Image Detector")
 
 # Create the Navigation Sidebar
 st.sidebar.title("Navigation")
-st.sidebar.radio( # Uses the session state key 'page'
+st.sidebar.radio( 
     "Go to",
-    ["Welcome", "Image Scanner"], # Renamed for clarity and consistency
+    ["Welcome", "Image Scanner"], 
     key='page'
 )
 
-# Conditional Page Display Logic (Checks use the new, consistent names)
+# Conditional Page Display Logic
 if st.session_state['page'] == "Welcome":
     # --- WELCOME PAGE ---
     st.markdown("""
-    Our website performs a two-step scan for *AI Generation* and *Digital Manipulation*.
-    
+    Our website performs a two-step scan for **AI Generation** and **Digital Manipulation**.
+
     * *AI Generation Check:* Identifies images created by AI models (like Midjourney or DALL-E).
     * *Manipulation Check (ELA):* Detects inconsistent compression—the telltale sign of Photoshop or editing software.
     """)
-    
+
     st.markdown("---")
-    
+
     # BUTTON
     st.subheader("Ready to Scan an Image?")
     st.button(
         "Image Scanner", 
         type="primary", 
         use_container_width=True, 
-        # This lambda function safely modifies the 'page' key on click
         on_click=lambda: st.session_state.update(page="Image Scanner")) 
-    
+
     st.markdown("---")
-    
+
 elif st.session_state['page'] == "Image Scanner":
     # --- SCANNER PAGE ---
     st.markdown("Upload an image to check for **AI Generation** and **Photoshop Manipulation**.")
@@ -192,22 +184,33 @@ elif st.session_state['page'] == "Image Scanner":
             else:
                 # Use st.spinner for user feedback during processing
                 with st.spinner('Analyzing image... This may take a moment.'):
-                    
-                    # 1. Capture the two returned variables:
-                    original_pil, overall_verdict = predict_image(
+ 
+                    # RESTORED: Captures all 4 returned variables
+                    original_pil, verdict_raw, ela_pil, verdict_ela = predict_image(
                         uploaded_file, model_raw, model_ela
                     )
-                
-                # --- DISPLAY SINGLE RESULT ---
-                st.markdown("---")
-                
-                st.subheader("Original Image")
-                st.image(original_pil, caption="Image Submitted for Analysis", use_column_width=True)
-                
-                st.markdown("---")
 
-                st.subheader("Final Integrity Assessment")
-                st.code(overall_verdict, language=None)
-                
-                # You can add a brief explanation of the verdict here if needed
-                st.info("This verdict combines the results of the Raw Image (AI) and ELA (Manipulation) scans.")
+                   # --- Display Results in two columns ---
+                    st.markdown("---")
+                    col1, col2 = st.columns(2)
+
+                   # Column 1: AI Generation Scan (Raw Image)
+                    with col1:
+                       st.subheader("1. AI Generation Scan (Raw Image)")
+                       st.image(original_pil, caption="Original Image", use_column_width=True)
+                       st.markdown("---")
+                       st.markdown("Verdict:")
+                       st.code(verdict_raw, language=None)
+
+                    # Column 2: Manipulation Scan (ELA)
+                    with col2:
+                        st.subheader("2. Manipulation Scan (ELA Map)")
+
+                        if ela_pil:
+                            st.image(ela_pil, caption="ELA Map (White indicates differences)", use_column_width=True)
+                        else:
+                            st.warning("ELA Map generation failed.")
+
+                            st.markdown("---")
+                            st.markdown("Verdict:")
+                            st.code(verdict_ela, language=None)
