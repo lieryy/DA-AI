@@ -6,14 +6,14 @@ import io
 
 # --- SESSION STATE INITIALIZATION ---
 if 'page' not in st.session_state:
-     st.session_state['page'] = "Welcome"
+    st.session_state['page'] = "Welcome"
 
 # --- CSS FOR WHITE BACKGROUND (Light Theme Default) AND LARGE UPLOADER ---
 page_bg_img = """
 <style>
 /* 1. Ensure the header/top bar is transparent */
 [data-testid="stHeader"] {
-     background-color: transparent !important;
+    background-color: transparent !important;
 }
 
 /* 2. FILE UPLOADER RESIZING */
@@ -26,27 +26,26 @@ page_bg_img = """
 }
 
 [data-testid="stFileUploadDropzone"] {
-     min-height: 400px !important;
-     height: 400px !important; 
-     padding: 40px !important; 
-     border-width: 2px;
-     border-style: dashed;
-     
+    min-height: 400px !important;
+    height: 400px !important; 
+    padding: 40px !important; 
+    border-width: 2px;
+    border-style: dashed;
     
     background-color: #E4EEF2 !important; 
     border-color: #BBDDE5 !important;    
 }
 
-
+/* Increase the font size for text inside the drop zone (e.g., "Drag and drop...") */
 [data-testid="stFileUploadDropzone"] p {
-     font-size: 1.4em !important;
-     color: #5E8F9B !important;
+    font-size: 1.4em !important;
+    color: #5E8F9B !important;
 }
 
 /* SVG */
 [data-testid="stFileUploadDropzone"] svg {
     fill: #5E8F9B !important; 
-    width: 120px !important;  
+    width: 120px !important; 
     height: 120px !important;
 }
 
@@ -66,11 +65,12 @@ st.markdown(page_bg_img, unsafe_allow_html=True)  # Inject the CSS
 # Hard-coded thresholds
 THRESHOLD_RAW = 0.021722
 THRESHOLD_ELA = 0.001001
+HUMAN_CONFIDENCE_THRESHOLD = 0.8 
 
 IMG_HEIGHT, IMG_WIDTH = 128, 128
 
 
-# --- 2. MODEL LOADING  ---
+# --- 2. MODEL LOADING ---
 
 @st.cache_resource
 def load_models():
@@ -78,13 +78,16 @@ def load_models():
     try:
         model_raw = tf.keras.models.load_model("model_raw.h5")
         model_ela = tf.keras.models.load_model("model_ela.h5")
-        return model_raw, model_ela
+        # NOTE: You must provide a human_detector_model.h5 file for the validation to work.
+        model_prescreen = tf.keras.models.load_model("human_detector_model.h5")
+        
+        return model_raw, model_ela, model_prescreen
     
     except Exception as e:
-        st.error(f"Error loading models. Please ensure 'model_raw.h5' and 'model_ela.h5' are present. Error: {e}")
-        return None, None
+        st.error(f"Error loading models. Please ensure 'model_raw.h5', 'model_ela.h5', and 'human_detector_model.h5' are present. Error: {e}")
+        return None, None, None
 
-model_raw, model_ela = load_models()
+model_raw, model_ela, model_prescreen = load_models()
 
 # --- 3. HELPER FUNCTIONS ---
 
@@ -113,7 +116,7 @@ def preprocess_for_model(image_pil):
     img_batch = np.expand_dims(img_array, axis=0)
     return img_batch
 
-# --- NEW FUNCTION FOR COMBINED VERDICT  ---
+# --- NEW FUNCTION FOR COMBINED VERDICT ---
 def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
     """Generates a final, verbose verdict string based on both error scores."""
     
@@ -143,7 +146,41 @@ def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
         f"{ela_verdict_prefix} {ela_error_str}"
     )
 
-# --- 4. MAIN PREDICTION FUNCTION (CORRECTED HYBRID LOGIC) ---
+# --- NEW FUNCTION: HUMAN CHECK (ENHANCED VALIDATION) ---
+def is_image_human(image_pil, model_prescreen):
+    """
+    Uses the prescreen model to check if the image contains a human, 
+    and validates that the prediction score isn't too low (e.g., text/blank image).
+    """
+    try:
+        # Preprocess the image for the classification model
+        img = image_pil.resize((IMG_WIDTH, IMG_HEIGHT)) 
+        img_array = tf.keras.utils.img_to_array(img) / 255.0
+        img_batch = np.expand_dims(img_array, axis=0)
+
+        # Predict confidence score (0 to 1)
+        prediction = model_prescreen.predict(img_batch, verbose=0)[0][0]
+        
+        # 1. Define rejection threshold for non-photographic content
+        MIN_PHOTOGRAPHIC_THRESHOLD = 0.05 
+        
+        # 2. Check if the image meets the MINIMUM confidence required to be a photo
+        if prediction < MIN_PHOTOGRAPHIC_THRESHOLD:
+            return "NON_PHOTO" 
+            
+        # 3. Check if the score meets the HIGH confidence required to be a human
+        elif prediction >= HUMAN_CONFIDENCE_THRESHOLD:
+            return "HUMAN_ACCEPTED"
+        
+        # 4. If score is in the middle (e.g., 0.1 to 0.79), it's another object/animal
+        else:
+            return "NON_HUMAN_OBJECT"
+        
+    except Exception as e:
+        print(f"Prescreening check failed: {e}")
+        return "CHECK_FAILED"
+
+# --- 4. MAIN PREDICTION FUNCTION ---
 def predict_image(uploaded_file, model_raw, model_ela):
     image_bytes = uploaded_file.read()
     image_stream = io.BytesIO(image_bytes)
@@ -190,7 +227,7 @@ def predict_image(uploaded_file, model_raw, model_ela):
     # D. RETURN ALL NECESSARY ITEMS FOR THE DISPLAY
     return original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string
 
-# --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
+# --- 5. STREAMLIT INTERFACE ---
 st.title("Anomaly-Based Detection of Synthetic Human Image")
 
 # Create the Navigation Sidebar
@@ -230,47 +267,64 @@ elif st.session_state['page'] == "Image Scanner":
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "tiff", "tif"])
 
     if uploaded_file is not None:
+        
+        # Initialize rejection flag and load preview (Level 1)
+        is_rejected = False 
         st.subheader("Image Preview:")
-        st.image(uploaded_file, caption=uploaded_file.name, use_column_width=False, width=300)
+        original_pil_check = Image.open(uploaded_file).convert('RGB') 
+        st.image(original_pil_check, caption=uploaded_file.name, use_column_width=False, width=300)
         st.markdown("---")
         
-        uploaded_file.seek(0) 
+        # --- HUMAN CHECK ENFORCEMENT (Level 1) ---
+        if model_prescreen: 
+            check_result = is_image_human(original_pil_check, model_prescreen)
 
-        if st.button("Scan Image", type="primary", use_container_width=True):
-            if model_raw is None or model_ela is None:
-                st.warning("Cannot run scan: Models failed to load. Check console for details.")
-            else:
-                # Use st.spinner for user feedback during processing
-                with st.spinner('Analyzing image... This may take a moment.'):
- 
-                    # RESTORED: Captures all 5 returned variables
-                    original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string = predict_image(
-                    uploaded_file, model_raw, model_ela
-                )
-                    
-
-                   # --- Display Results in two columns ---
-                    st.markdown("---")
-                    col1, col2 = st.columns(2)
-
-                   # Column 1: AI Generation Scan (Raw Image)
-                    with col1:
-                       st.subheader("1. AI Generation Scan (Raw Image)")
-                       st.image(original_pil, caption="Original Image", use_column_width=True)
-
-                    # Column 2: Manipulation Scan (ELA)
-                    with col2:
-                        st.subheader("2. Manipulation Scan (ELA Map)")
-
-                        if ela_pil:
-                            st.image(ela_pil, caption="ELA Map (White indicates differences)", use_column_width=True)
-                        else:
-                            st.warning("ELA Map generation failed.")
-                
-                            
-                    # --- DISPLAY THE COMBINED VERDICT BELOW THE COLUMNS ---
-                    st.markdown("---")
-                    st.subheader("Verdict")
+            if check_result == "NON_PHOTO":
+                st.error("🚫 **Upload Rejected:** Please input a human image. This application does not process plain text or non-photographic content.")
+                is_rejected = True 
             
-                    # Display the combined string that contains both results and both errors
-                    st.code(overall_verdict_string, language=None)
+            elif check_result == "NON_HUMAN_OBJECT":
+                st.error("🚫 **Upload Rejected:** This application is specialized for human images only. Please upload an image containing a human subject.")
+                is_rejected = True
+        
+        # --- 3. RUN SCAN IF CHECK PASSES (Level 1) ---
+        # Only show the button and run the scan if the file passed validation
+        if not is_rejected:
+            uploaded_file.seek(0) # Reset file pointer for predict_image 
+
+            if st.button("Scan Image", type="primary", use_container_width=True):
+                
+                # Check for detection model loading failures before prediction
+                if model_raw is None or model_ela is None:
+                    st.warning("Cannot run scan: Detection models failed to load. Check console for details.")
+                else:
+                    # Use st.spinner for user feedback during processing (Level 2)
+                    with st.spinner('Analyzing image... This may take a moment.'):
+        
+                        # Captures all 5 returned variables (Level 3)
+                        original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string = predict_image(
+                            uploaded_file, model_raw, model_ela
+                        )
+                        
+                        # --- Display Results in two columns (Level 3) ---
+                        st.markdown("---")
+                        col1, col2 = st.columns(2)
+
+                        # Column 1: AI Generation Scan (Raw Image)
+                        with col1:
+                            st.subheader("1. AI Generation Scan (Raw Image)")
+                            st.image(original_pil, caption="Original Image", use_column_width=True)
+
+                        # Column 2: Manipulation Scan (ELA)
+                        with col2:
+                            st.subheader("2. Manipulation Scan (ELA Map)")
+
+                            if ela_pil:
+                                st.image(ela_pil, caption="ELA Map (White indicates differences)", use_column_width=True)
+                            else:
+                                st.warning("ELA Map generation failed.")
+                            
+                        # --- DISPLAY THE COMBINED VERDICT BELOW THE COLUMNS (Level 3) ---
+                        st.markdown("---")
+                        st.subheader("Verdict")
+                        st.code(overall_verdict_string, language=None)
