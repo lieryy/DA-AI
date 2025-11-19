@@ -92,50 +92,83 @@ def preprocess_for_model(image_pil):
     img_batch = np.expand_dims(img_array, axis=0)
     return img_batch
 
-# --- 4. MAIN PREDICTION FUNCTION (RESTORED TO OLD LOGIC)  ---
+# --- NEW FUNCTION FOR COMBINED VERDICT  ---
+def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
+    """Generates a final, verbose verdict string based on both error scores."""
+    
+    is_raw_anomaly = error_raw > threshold_raw
+    is_ela_anomaly = error_ela > threshold_ela
+    
+    raw_error_str = f"ERROR: {error_raw:.5f}"
+    ela_error_str = f"ERROR: {error_ela:.5f}"
+    
+    # Calculate the ELA string carefully, handling the None case if ELA failed
+    if error_ela == 1.0: # Use 1.0 as the flag for ELA failure
+        ela_error_str = "ERROR: ELA calculation failed."
+        ela_verdict_prefix = "ERROR"
+    elif is_ela_anomaly:
+        ela_verdict_prefix = "ANOMALY (MANIPULATED)"
+    else:
+        ela_verdict_prefix = "REAL (CONSISTENT COMPRESSION)"
+        
+    # Calculate the RAW string
+    if is_raw_anomaly:
+        raw_verdict_prefix = "ANOMALY (POSSIBLE AI)"
+    else:
+        raw_verdict_prefix = "REAL (NATURAL PIXELS)"
+
+    return (
+        f"{raw_verdict_prefix} {raw_error_str}\n"
+        f"{ela_verdict_prefix} {ela_error_str}"
+    )
+
+# --- 4. MAIN PREDICTION FUNCTION (CORRECTED HYBRID LOGIC) ---
 def predict_image(uploaded_file, model_raw, model_ela):
     image_bytes = uploaded_file.read()
     image_stream = io.BytesIO(image_bytes)
     original_pil = Image.open(image_stream).convert('RGB')
     input_raw = preprocess_for_model(original_pil)
-
- # A. RAW ANALYSIS
+    
+    # A. RAW ANALYSIS (Calculate error_raw first)
     if model_raw:
         reconstructed_raw = model_raw.predict(input_raw, verbose=0)
         error_raw = np.mean(np.square(input_raw - reconstructed_raw))
     else:
-        error_raw = 0.0
- 
+        error_raw = 0.0 # Set error_raw for final verdict calculation
+
     if error_raw > THRESHOLD_RAW:
         verdict_raw = f"ANOMALY (Possible AI)\nError: {error_raw:.5f}"
     else:
         verdict_raw = f"REAL (Natural Pixels)\nError: {error_raw:.5f}"
- 
-     # B. ELA ANALYSIS
+        
+    # B. ELA ANALYSIS (Calculate error_ela and verdict_ela/ela_pil)
     image_stream.seek(0)
     ela_pil = calculate_ela(image_stream)
-
+    
     if ela_pil is None:
-        # Return partial results if ELA fails
-        return original_pil, verdict_raw, None, "ERROR: ELA calculation failed."
-
-    input_ela = preprocess_for_model(ela_pil)
-
-    if model_ela:
-        reconstructed_ela = model_ela.predict(input_ela, verbose=0)
-        error_ela = np.mean(np.square(input_ela - reconstructed_ela))
+        error_ela = 1.0 # Set error_ela high for failure
+        verdict_ela = "ERROR: ELA calculation failed."
+        # Keep ela_pil as None for the display
     else:
-        error_ela = 0.0
- 
-    if error_ela > THRESHOLD_ELA:
-        verdict_ela = f"ANOMALY (Manipulated)\nError: {error_ela:.5f}"
-    else:
-        verdict_ela = f"REAL (Consistent Compression)\nError: {error_ela:.5f}"
+        input_ela = preprocess_for_model(ela_pil)
+        if model_ela:
+            reconstructed_ela = model_ela.predict(input_ela, verbose=0)
+            error_ela = np.mean(np.square(input_ela - reconstructed_ela))
+        else:
+            error_ela = 0.0
 
-    # RESTORED: Returns the two separate verdicts and the ELA image
-    return original_pil, verdict_raw, ela_pil, verdict_ela 
+        if error_ela > THRESHOLD_ELA:
+            verdict_ela = f"ANOMALY (Manipulated)\nError: {error_ela:.5f}"
+        else:
+            verdict_ela = f"REAL (Consistent Compression)\nError: {error_ela:.5f}"
 
-
+    # C. GET COMBINED VERDICT STRING (Pass error_raw and error_ela to the new function)
+    overall_verdict_string = get_overall_verdict(
+        error_raw, error_ela, THRESHOLD_RAW, THRESHOLD_ELA
+    )
+    
+    # D. RETURN ALL NECESSARY ITEMS FOR THE DISPLAY
+    return original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string
 # --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
 st.title("Synthetic & Manipulated Image Detector")
 
@@ -186,9 +219,10 @@ elif st.session_state['page'] == "Image Scanner":
                 with st.spinner('Analyzing image... This may take a moment.'):
  
                     # RESTORED: Captures all 4 returned variables
-                    original_pil, verdict_raw, ela_pil, verdict_ela = predict_image(
-                        uploaded_file, model_raw, model_ela
-                    )
+                    original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string = predict_image(
+                    uploaded_file, model_raw, model_ela
+                )
+                    
 
                    # --- Display Results in two columns ---
                     st.markdown("---")
@@ -214,3 +248,10 @@ elif st.session_state['page'] == "Image Scanner":
                             st.markdown("---")
                             st.markdown("Verdict:")
                             st.code(verdict_ela, language=None)
+                            
+                    # --- DISPLAY THE COMBINED VERDICT BELOW THE COLUMNS ---
+                    st.markdown("---")
+                    st.subheader("Combined Final Verdict")
+            
+                    # Display the combined string that contains both results and both errors
+                    st.code(overall_verdict_string, language=None)
