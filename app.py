@@ -162,10 +162,10 @@ st.sidebar.radio( # Uses the session state key 'page'
 if st.session_state['page'] == "Welcome":
     # --- WELCOME PAGE ---
     st.markdown("""
-    Our website performs a two-step scan for **AI Generation** and **Digital Manipulation**.
+    Our website performs a two-step scan for *AI Generation* and *Digital Manipulation*.
     
-    * **AI Generation Check:** Identifies images created by AI models (like Midjourney or DALL-E).
-    * **Manipulation Check (ELA):** Detects inconsistent compression—the telltale sign of Photoshop or editing software.
+    * *AI Generation Check:* Identifies images created by AI models (like Midjourney or DALL-E).
+    * *Manipulation Check (ELA):* Detects inconsistent compression—the telltale sign of Photoshop or editing software.
     """)
     
     st.markdown("---")
@@ -183,7 +183,7 @@ if st.session_state['page'] == "Welcome":
     
 elif st.session_state['page'] == "Image Scanner":
     # --- SCANNER PAGE ---
-    st.markdown("Upload an image to check for **AI Generation** and **Photoshop Manipulation**.")
+    st.markdown("Upload an image to check for *AI Generation* and *Photoshop Manipulation*.")
 
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "tiff", "tif"])
 
