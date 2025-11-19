@@ -150,7 +150,6 @@ def predict_image(uploaded_file, model_raw, model_ela):
     original_pil = Image.open(image_stream).convert('RGB')
     input_raw = preprocess_for_model(original_pil)
     
-    #removed 
     # A. RAW ANALYSIS (Calculate error_raw first)
     if model_raw:
         reconstructed_raw = model_raw.predict(input_raw, verbose=0)
