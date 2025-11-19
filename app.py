@@ -20,19 +20,31 @@ page_bg_img = """
 [data-testid="stFileUploadDropzone"] {
      min-height: 400px !important; /* FORCED vertical size */
      padding: 40px !important; /* FORCED internal space */
-     border-width: 3px;
+     border-width: 2px;
      border-style: dashed;
+     
+    /* NEW: Lighten the background and border color */
+    background-color: #E4EEF2 !important; /* Very light gray background */
+    border-color: #BBDDE5 !important;    /* Light gray dashed border */
 }
 
 /* Increase the font size for text inside the drop zone (e.g., "Drag and drop...") */
 [data-testid="stFileUploadDropzone"] p {
      font-size: 1.4em !important;
+     color: #5E8F9B !important;
+}
+
+/* SVG */
+[data-testid="stFileUploadDropzone"] svg {
+    fill: #5E8F9B !important; 
+    width: 120px !important;  
+    height: 120px !important;
 }
 
 /* Increase the font size for the "Browse files" button */
 [data-testid="baseButton-secondary"] {
-     font-size: 1.1em;
-     padding: 10px 20px;
+    font-size: 1.1em;
+    padding: 10px 20px;
 }
 </style>
 """
@@ -209,6 +221,10 @@ elif st.session_state['page'] == "Image Scanner":
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "tiff", "tif"])
 
     if uploaded_file is not None:
+        st.subheader("Image Preview:")
+        st.image(uploaded_file, caption=uploaded_file.name, use_column_width=False, width=300)
+        st.markdown("---")
+        
         uploaded_file.seek(0) 
 
         if st.button("Scan Image", type="primary", use_container_width=True):
