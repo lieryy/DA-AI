@@ -134,7 +134,7 @@ def predict_image(uploaded_file, model_raw, model_ela):
         reconstructed_raw = model_raw.predict(input_raw, verbose=0)
         error_raw = np.mean(np.square(input_raw - reconstructed_raw))
     else:
-        error_raw = 0.0 # Set error_raw for final verdict calculation
+        error_raw = 0.0 
 
     if error_raw > THRESHOLD_RAW:
         verdict_raw = f"ANOMALY (Possible AI)\nError: {error_raw:.5f}"
@@ -148,7 +148,6 @@ def predict_image(uploaded_file, model_raw, model_ela):
     if ela_pil is None:
         error_ela = 1.0 # Set error_ela high for failure
         verdict_ela = "ERROR: ELA calculation failed."
-        # Keep ela_pil as None for the display
     else:
         input_ela = preprocess_for_model(ela_pil)
         if model_ela:
@@ -169,7 +168,9 @@ def predict_image(uploaded_file, model_raw, model_ela):
     
     # D. RETURN ALL NECESSARY ITEMS FOR THE DISPLAY
     return original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string
+
 # --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
+elif st.session_state['page'] == "Image Scanner":
 st.title("Synthetic & Manipulated Image Detector")
 
 # Create the Navigation Sidebar
@@ -218,7 +219,7 @@ elif st.session_state['page'] == "Image Scanner":
                 # Use st.spinner for user feedback during processing
                 with st.spinner('Analyzing image... This may take a moment.'):
  
-                    # RESTORED: Captures all 4 returned variables
+                    # RESTORED: Captures all 5 returned variables
                     original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string = predict_image(
                     uploaded_file, model_raw, model_ela
                 )
@@ -232,9 +233,6 @@ elif st.session_state['page'] == "Image Scanner":
                     with col1:
                        st.subheader("1. AI Generation Scan (Raw Image)")
                        st.image(original_pil, caption="Original Image", use_column_width=True)
-                       st.markdown("---")
-                       st.markdown("Verdict:")
-                       st.code(verdict_raw, language=None)
 
                     # Column 2: Manipulation Scan (ELA)
                     with col2:
@@ -244,14 +242,11 @@ elif st.session_state['page'] == "Image Scanner":
                             st.image(ela_pil, caption="ELA Map (White indicates differences)", use_column_width=True)
                         else:
                             st.warning("ELA Map generation failed.")
-
-                            st.markdown("---")
-                            st.markdown("Verdict:")
-                            st.code(verdict_ela, language=None)
+                
                             
                     # --- DISPLAY THE COMBINED VERDICT BELOW THE COLUMNS ---
                     st.markdown("---")
-                    st.subheader("Combined Final Verdict")
+                    st.subheader("Verdict")
             
                     # Display the combined string that contains both results and both errors
                     st.code(overall_verdict_string, language=None)
