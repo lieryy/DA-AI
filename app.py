@@ -34,15 +34,15 @@ body {
 
 /* Target the main drop zone area */
 [data-testid="stFileUploadDropzone"] {
-    min-height: 250px; /* Increase the vertical size */
-    padding: 30px;    /* Add internal space */
+    min-height: 400px; /* Increase the vertical size */
+    padding: 40px;    /* Add internal space */
     border-width: 3px; /* Make the border thicker */
     border-style: dashed;
 }
 
 /* Increase the font size for text inside the drop zone (e.g., "Drag and drop...") */
 [data-testid="stFileUploadDropzone"] p {
-    font-size: 1.2em; 
+    font-size: 1.4em !important;  
 }
 
 /* Increase the font size for the "Browse files" button */
@@ -172,12 +172,12 @@ if st.session_state['page'] == "Welcome":
     
     # BUTTON
     st.subheader("Ready to Scan an Image?")
-    if st.button(
+    st.button(
         "Image Scanner", 
         type="primary", 
         use_container_width=True, 
         # This lambda function safely modifies the 'page' key on click
-        on_click=lambda: st.session_state.update(page="Image Scanner")): 
+        on_click=lambda: st.session_state.update(page="Image Scanner")) 
     
     st.markdown("---")
     
