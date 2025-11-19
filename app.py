@@ -8,49 +8,34 @@ import io
 if 'page' not in st.session_state:
     st.session_state['page'] = "Welcome"
 
-# --- CSS FOR DARK BACKGROUND  ---
+# --- CSS FOR WHITE BACKGROUND (Light Theme Default) AND LARGE UPLOADER ---
 page_bg_img = """
 <style>
-/* Target the main body and the root container for maximum coverage */
-body {
-    background-color: #000000 !important;
-    color: #FFFFFF !important;
-}
-
-/* Target the outermost div container (if the above doesn't work alone) */
-.stApp {
-    background-color: #000000 !important;
-}
+/* 1. REMOVED ALL BLACK BACKGROUND AND WHITE TEXT STYLES */
 
 /* Ensure the header/top bar is transparent */
 [data-testid="stHeader"] {
-    background-color: transparent !important;
+     background-color: transparent !important;
 }
 
-/* Optional: Darken the sidebar for a consistent look */
-[data-testid="stSidebar"] {
-    background-color: #111111 !important; 
-}
-
-/* Target the main drop zone area */
+/* 2. FILE UPLOADER RESIZING  */
 [data-testid="stFileUploadDropzone"] {
-    min-height: 400px; /* Increase the vertical size */
-    padding: 40px;    /* Add internal space */
-    border-width: 3px; /* Make the border thicker */
-    border-style: dashed;
+     min-height: 400px; /* Increase the vertical size */
+     padding: 40px; /* Add internal space */
+     border-width: 3px; /* Make the border thicker */
+     border-style: dashed;
 }
 
 /* Increase the font size for text inside the drop zone (e.g., "Drag and drop...") */
 [data-testid="stFileUploadDropzone"] p {
-    font-size: 1.4em !important;  
+     font-size: 1.4em !important; 
 }
 
 /* Increase the font size for the "Browse files" button */
 [data-testid="baseButton-secondary"] {
-    font-size: 1.1em;
-    padding: 10px 20px;
+     font-size: 1.1em;
+     padding: 10px 20px;
 }
-
 </style>
 """
 
