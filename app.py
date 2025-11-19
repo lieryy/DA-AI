@@ -7,7 +7,7 @@ import io
 # --- 1. CONFIGURATION & SETUP ---
 
 # IMPORTANT: This must be the very first Streamlit command
-st.set_page_config(page_title="Deepfake & Manipulation Detector", layout="wide") 
+st.set_page_config(page_title="Synthetic & Manipulated Image Detector", layout="wide") 
 
 # Hard-coded thresholds
 THRESHOLD_RAW = 0.021722
@@ -121,8 +121,7 @@ def predict_image(uploaded_file, model_raw, model_ela):
 
 # --- 5. STREAMLIT INTERFACE ---
 
-st.title("Deepfake & Manipulation Detector")
-st.markdown("# Synthetic & Manipulated Image Detector")
+st.title("Synthetic & Manipulated Image Detector")
 st.markdown("Upload an image to check for **AI Generation** and **Photoshop Manipulation**.")
 
 # --- File Uploader and Button setup (in a single column for clean layout) ---
