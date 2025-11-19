@@ -60,7 +60,7 @@ page_bg_img = """
 
 # --- 1. CONFIGURATION & SETUP ---
 st.set_page_config(
-    page_title="Synthetic & Manipulated Image Detector", layout="wide")
+    page_title="Anomaly-Based Detection of Synthetic Human Images", layout="wide")
 st.markdown(page_bg_img, unsafe_allow_html=True)  # Inject the CSS
 
 # Hard-coded thresholds
@@ -191,7 +191,7 @@ def predict_image(uploaded_file, model_raw, model_ela):
     return original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string
 
 # --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
-st.title("Synthetic & Manipulated Image Detector")
+st.title("Anomaly-Based Detection of Synthetic Human Image")
 
 # Create the Navigation Sidebar
 st.sidebar.title("Navigation")
