@@ -20,8 +20,8 @@ page_bg_img = """
 
 /* 2. FILE UPLOADER RESIZING  */
 [data-testid="stFileUploadDropzone"] {
-     min-height: 400px; /* Increase the vertical size */
-     padding: 40px; /* Add internal space */
+     min-height: 400px !important; /* Increase the vertical size */
+     padding: 40px; !important/* Add internal space */
      border-width: 3px; /* Make the border thicker */
      border-style: dashed;
 }
