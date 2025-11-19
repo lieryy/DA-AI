@@ -53,7 +53,7 @@ IMG_HEIGHT, IMG_WIDTH = 128, 128
 
 @st.cache_resource
 def load_models():
-     """Loads the models and caches them to prevent reloading on every script rerun."""
+    """Loads the models and caches them to prevent reloading on every script rerun."""
     try:
         model_raw = tf.keras.models.load_model("model_raw.h5")
         model_ela = tf.keras.models.load_model("model_ela.h5")
