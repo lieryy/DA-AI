@@ -14,6 +14,7 @@ page_bg_img = """
 /* Target the main body and the root container for maximum coverage */
 body {
     background-color: #000000 !important;
+    color: #FFFFFF !important;
 }
 
 /* Target the outermost div container (if the above doesn't work alone) */
@@ -80,12 +81,6 @@ def load_models():
 model_raw, model_ela = load_models()
 
 # --- 3. HELPER FUNCTIONS ---
-
-# --- NEW FUNCTION FOR NAVIGATION ---
-def go_to_scanner():
-    """Sets the session state to switch to the scanner page."""
-    st.session_state['page'] = "Image Scanner"
-# ----------------------------------------
 
 def calculate_ela(image_stream, quality=90):
     try:
@@ -166,8 +161,6 @@ st.sidebar.radio( # Uses the session state key 'page'
 # Conditional Page Display Logic (Checks use the new, consistent names)
 if st.session_state['page'] == "Welcome":
     # --- WELCOME PAGE ---
-    st.header("Truth or Tampering? Find Out Now.")
-    
     st.markdown("""
     Our website performs a two-step scan for **AI Generation** and **Digital Manipulation**.
     
@@ -179,8 +172,12 @@ if st.session_state['page'] == "Welcome":
     
     # BUTTON
     st.subheader("Ready to Scan an Image?")
-    if st.button("Image Scanner", type="primary", use_container_width=True): 
-        go_to_scanner()
+    if st.button(
+        "Image Scanner", 
+        type="primary", 
+        use_container_width=True, 
+        # This lambda function safely modifies the 'page' key on click
+        on_click=lambda: st.session_state.update(page="Image Scanner")): 
     
     st.markdown("---")
     
