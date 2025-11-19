@@ -170,7 +170,6 @@ def predict_image(uploaded_file, model_raw, model_ela):
     return original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string
 
 # --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
-elif st.session_state['page'] == "Image Scanner":
 st.title("Synthetic & Manipulated Image Detector")
 
 # Create the Navigation Sidebar
