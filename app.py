@@ -17,22 +17,27 @@ page_bg_img = """
 }
 
 /* 2. FILE UPLOADER RESIZING */
-[data-testid="stFileUploader"] {
-    height: 450px !important; /* Forces the outer wrapper height */
+[data-testid="stFileUploadDropzone"] > div:first-child { 
+    min-height: 380px !important; 
+    display: flex !important; 
+    flex-direction: column !important;
+    justify-content: center !important; 
+    align-items: center !important; 
 }
 
 [data-testid="stFileUploadDropzone"] {
-     height: 400px !important; /* FORCED vertical size */
-     padding: 40px !important; /* FORCED internal space */
+     min-height: 400px !important;
+     height: 400px !important; 
+     padding: 40px !important; 
      border-width: 2px;
      border-style: dashed;
      
-    /* NEW: Lighten the background and border color */
-    background-color: #E4EEF2 !important; /* Very light gray background */
-    border-color: #BBDDE5 !important;    /* Light gray dashed border */
+    
+    background-color: #E4EEF2 !important; 
+    border-color: #BBDDE5 !important;    
 }
 
-/* Increase the font size for text inside the drop zone (e.g., "Drag and drop...") */
+
 [data-testid="stFileUploadDropzone"] p {
      font-size: 1.4em !important;
      color: #5E8F9B !important;
