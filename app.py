@@ -1,276 +1,288 @@
 import streamlit as st
 import tensorflow as tf
 import numpy as np
+import joblib
 from PIL import Image, ImageChops, ImageEnhance
 import io
 
-# --- SESSION STATE INITIALIZATION ---
-if 'page' not in st.session_state:
-     st.session_state['page'] = "Welcome"
-
-# --- CSS FOR WHITE BACKGROUND (Light Theme Default) AND LARGE UPLOADER ---
-page_bg_img = """
-<style>
-/* 1. Ensure the header/top bar is transparent */
-[data-testid="stHeader"] {
-     background-color: transparent !important;
-}
-
-/* 2. FILE UPLOADER RESIZING */
-[data-testid="stFileUploadDropzone"] > div:first-child { 
-    min-height: 380px !important; 
-    display: flex !important; 
-    flex-direction: column !important;
-    justify-content: center !important; 
-    align-items: center !important; 
-}
-
-[data-testid="stFileUploadDropzone"] {
-     min-height: 400px !important;
-     height: 400px !important; 
-     padding: 40px !important; 
-     border-width: 2px;
-     border-style: dashed;
-     
-    
-    background-color: #E4EEF2 !important; 
-    border-color: #BBDDE5 !important;    
-}
-
-
-[data-testid="stFileUploadDropzone"] p {
-     font-size: 1.4em !important;
-     color: #5E8F9B !important;
-}
-
-/* SVG */
-[data-testid="stFileUploadDropzone"] svg {
-    fill: #5E8F9B !important; 
-    width: 120px !important;  
-    height: 120px !important;
-}
-
-/* Increase the font size for the "Browse files" button */
-[data-testid="baseButton-secondary"] {
-    font-size: 1.1em;
-    padding: 10px 20px;
-}
-</style>
-"""
-
-# --- 1. CONFIGURATION & SETUP ---
-st.set_page_config(
-    page_title="Anomaly-Based Detection of Synthetic Human Images", layout="wide")
-st.markdown(page_bg_img, unsafe_allow_html=True)  # Inject the CSS
-
-# Hard-coded thresholds
-THRESHOLD_RAW = 0.021722
-THRESHOLD_ELA = 0.001001
+# ==========================================
+# 1. CONFIGURATION
+# ==========================================
+# Threshold for ELA Model (Reconstruction Error)
+THRESHOLD_ELA = 0.004158
+# Threshold for Isolation Forest (Anomaly Score). Score < Threshold is ANOMALY.
+THRESHOLD_IF_ANOMALY = -0.1 
 
 IMG_HEIGHT, IMG_WIDTH = 128, 128
 
+# Set up the Streamlit page configuration
+st.set_page_config(
+    page_title="Anomaly-Based Synthetic Human Detector",
+    layout="centered",
+    initial_sidebar_state="auto"
+)
 
-# --- 2. MODEL LOADING  ---
+# ==========================================
+# 2. MODEL LOADING (Cached for performance)
+# ==========================================
 
 @st.cache_resource
 def load_models():
-    """Loads the models and caches them to prevent reloading on every script rerun."""
-    try:
-        model_raw = tf.keras.models.load_model("model_raw.h5")
-        model_ela = tf.keras.models.load_model("model_ela.h5")
-        return model_raw, model_ela
+    """Loads all ML models and assets using Streamlit caching."""
     
-    except Exception as e:
-        st.error(f"Error loading models. Please ensure 'model_raw.h5' and 'model_ela.h5' are present. Error: {e}")
-        return None, None
-
-model_raw, model_ela = load_models()
-
-# --- 3. HELPER FUNCTIONS ---
-
-def calculate_ela(image_stream, quality=90):
+    # Initialize containers for feedback
+    loading_messages = []
+    
+    # A. Load the Isolation Forest
     try:
-        image_stream.seek(0)
-        original = Image.open(image_stream).convert('RGB')
+        clf = joblib.load('isolation_forest.joblib')
+        loading_messages.append("✅ Isolation Forest loaded.")
+    except Exception:
+        clf = None
+        loading_messages.append("❌ ERROR: 'isolation_forest.joblib' not found. AI detection will be skipped.")
+
+    # B. Re-build VGG16 (Feature Extractor)
+    base_model = tf.keras.applications.VGG16(
+        weights='imagenet', 
+        include_top=False, 
+        input_shape=(IMG_HEIGHT, IMG_WIDTH, 3)
+    )
+    inputs = tf.keras.Input(shape=(IMG_HEIGHT, IMG_WIDTH, 3))
+    x = tf.keras.applications.vgg16.preprocess_input(inputs)
+    x = base_model(x, training=False)
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    feature_extractor = tf.keras.Model(inputs, x)
+    loading_messages.append("✅ VGG16 Feature Extractor ready.")
+
+    # C. Load the ELA Autoencoder
+    try:
+        model_ela = tf.keras.models.load_model("model_ela.h5")
+        loading_messages.append("✅ ELA Model loaded.")
+    except Exception:
+        model_ela = None
+        loading_messages.append("❌ ERROR: 'model_ela.h5' not found. Manipulation detection will be skipped.")
+        
+    return clf, feature_extractor, model_ela, loading_messages
+
+clf, feature_extractor, model_ela, loading_feedback = load_models()
+
+
+# ==========================================
+# 3. HELPER FUNCTIONS
+# ==========================================
+
+def calculate_ela(pil_image, quality=90):
+    """Generates an ELA image from a PIL Image object."""
+    try:
+        original = pil_image.convert('RGB')
+        
+        # Save as temp JPEG to memory (the core ELA step)
         buffer = io.BytesIO()
         original.save(buffer, 'JPEG', quality=quality)
         buffer.seek(0)
         resaved = Image.open(buffer)
+        
+        # Calculate difference
         ela = ImageChops.difference(original, resaved)
+        
+        # Enhance
         extrema = ela.getextrema()
         max_diff = max([c[1] for c in extrema])
-        scale = 255.0 / (max_diff if max_diff != 0 else 1)
+        if max_diff == 0: max_diff = 1
+        scale = 255.0 / max_diff
         ela_scaled = ImageEnhance.Brightness(ela).enhance(scale)
         return ela_scaled
     except Exception as e:
         st.error(f"Error in ELA calculation: {e}")
         return None
 
-def preprocess_for_model(image_pil):
-    img = image_pil.resize((IMG_WIDTH, IMG_HEIGHT))
-    img_array = tf.keras.utils.img_to_array(img)
-    img_array = img_array / 255.0
-    img_batch = np.expand_dims(img_array, axis=0)
+def preprocess_image(pil_image):
+    """Loads and prepares PIL image for VGG16 (Feature Extractor)"""
+    # Resize and convert to array
+    img = pil_image.resize((IMG_HEIGHT, IMG_WIDTH))
+    img = tf.keras.utils.img_to_array(img)
+    
+    # Add batch dimension. VGG preprocessing is done inside the model wrapper.
+    img_batch = np.expand_dims(img, axis=0)
     return img_batch
 
-# --- NEW FUNCTION FOR COMBINED VERDICT  ---
-def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
-    """Generates a final, verbose verdict string based on both error scores."""
+def preprocess_ela(ela_pil):
+    """Prepares ELA image for Autoencoder"""
+    img = ela_pil.resize((IMG_HEIGHT, IMG_WIDTH))
+    img_array = tf.keras.utils.img_to_array(img)
+    img_array = img_array / 255.0 # Autoencoder expects 0-1
+    img_batch = np.expand_dims(img_array, axis=0)
+    return img_batch
     
-    is_raw_anomaly = error_raw > threshold_raw
+# --- NEW FUNCTION FOR COMBINED VERDICT  ---
+def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
+    """Generates a consolidated verdict string matching the user's requested format."""
+    
+    is_raw_anomaly = error_raw < threshold_raw 
     is_ela_anomaly = error_ela > threshold_ela
     
-    raw_error_str = f"ERROR: {error_raw:.5f}"
-    ela_error_str = f"ERROR: {error_ela:.5f}"
+    raw_score_str = f"{error_raw:.5f}"
+    ela_error_str = f"{error_ela:.5f}"
     
-    # Calculate the ELA string carefully, handling the None case if ELA failed
-    if error_ela == 1.0: # Use 1.0 as the flag for ELA failure
-        ela_error_str = "ERROR: ELA calculation failed."
-        ela_verdict_prefix = "ERROR"
-    elif is_ela_anomaly:
-        ela_verdict_prefix = "ANOMALY (MANIPULATED)"
-    else:
-        ela_verdict_prefix = "REAL (CONSISTENT COMPRESSION)"
+    # Handle ELA failure first
+    if error_ela == 1.0:
+        return "**❌ SCAN FAILURE: ELA Calculation Failed. Check model files.**"
         
-    # Calculate the RAW string
-    if is_raw_anomaly:
-        raw_verdict_prefix = "ANOMALY (POSSIBLE AI)"
-    else:
-        raw_verdict_prefix = "REAL (NATURAL PIXELS)"
-
-    return (
-        f"{raw_verdict_prefix} {raw_error_str}\n"
-        f"{ela_verdict_prefix} {ela_error_str}"
-    )
-
-# --- 4. MAIN PREDICTION FUNCTION (CORRECTED HYBRID LOGIC) ---
-def predict_image(uploaded_file, model_raw, model_ela):
-    image_bytes = uploaded_file.read()
-    image_stream = io.BytesIO(image_bytes)
-    original_pil = Image.open(image_stream).convert('RGB')
-    input_raw = preprocess_for_model(original_pil)
-    
-    # A. RAW ANALYSIS (Calculate error_raw first)
-    if model_raw:
-        reconstructed_raw = model_raw.predict(input_raw, verbose=0)
-        error_raw = np.mean(np.square(input_raw - reconstructed_raw))
-    else:
-        error_raw = 0.0 
-
-    if error_raw > THRESHOLD_RAW:
-        verdict_raw = f"ANOMALY (Possible AI)\nError: {error_raw:.5f}"
-    else:
-        verdict_raw = f"REAL (Natural Pixels)\nError: {error_raw:.5f}"
+    # --- Case 1: BOTH REAL ---
+    if not is_raw_anomaly and not is_ela_anomaly:
+        # Desired: REAL (NATURAL PIXELS) ERROR: 0.6456 (CONSISTENT COPDSGD) ERROR:
+        return (
+            f"✅ REAL (NATURAL PIXELS) ERROR: {raw_score_str}\n"
+            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}"
+        )
         
-    # B. ELA ANALYSIS (Calculate error_ela and verdict_ela/ela_pil)
-    image_stream.seek(0)
-    ela_pil = calculate_ela(image_stream)
+    # --- Case 2: F RAW, R ELA (AI Anomaly Only) ---
+    if is_raw_anomaly and not is_ela_anomaly:
+        # Desired: ANOMALY (POSSIBLE AI) ERROR:
+        return f"⚠️ ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}"
+        
+    # --- Case 3: R RAW, F ELA (Manipulation Anomaly Only) ---
+    if not is_raw_anomaly and is_ela_anomaly:
+        # Desired: ANOMALY (MANIPULATED) ERROR:
+        return f"⚠️ ANOMALY (MANIPULATED) ERROR: {ela_error_str}"
+        
+    # --- Case 4: F BOTH (AI and Manipulation Anomalies) ---
+    if is_raw_anomaly and is_ela_anomaly:
+        # Desired: ANOMALY (POSSIBLE AI) ERROR: (MANIPULATED) ERROR:
+        return (
+            f"⚠️ ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n"
+            f"	(MANIPULATED) ERROR: {ela_error_str}"
+        )
+
+    # Fallback (shouldn't happen)
+    return "UNKNOWN VERDICT STATE"
+
+
+# ==========================================
+# 4. MAIN PREDICTION LOGIC
+# ==========================================
+
+def predict_image_streamlit(pil_image):
     
-    if ela_pil is None:
-        error_ela = 1.0 # Set error_ela high for failure
-        verdict_ela = "ERROR: ELA calculation failed."
+    # Initialize error values (IF score: higher is more normal, lower is anomaly)
+    anomaly_score = 0.5 # Default score for skipping/normal
+    ela_error_val = 1.0 # Default to failure flag (as per get_overall_verdict logic)
+
+    # --- TEST 1: AI GENERATION CHECK (VGG16 + IF) ---
+    if clf is None:
+        anomaly_score = 0.5 
     else:
-        input_ela = preprocess_for_model(ela_pil)
-        if model_ela:
-            reconstructed_ela = model_ela.predict(input_ela, verbose=0)
-            error_ela = np.mean(np.square(input_ela - reconstructed_ela))
-        else:
-            error_ela = 0.0
+        with st.spinner('Running VGG16 Feature Extraction...'):
+            # 1. Extract Features
+            img_batch_vgg = preprocess_image(pil_image)
+            features = feature_extractor.predict(img_batch_vgg, verbose=0)
+            
+        with st.spinner('Running Isolation Forest Anomaly Detection...'):
+            # 2. Calculate Anomaly Score (Raw Error)
+            anomaly_score = clf.decision_function(features)[0] 
 
-        if error_ela > THRESHOLD_ELA:
-            verdict_ela = f"ANOMALY (Manipulated)\nError: {error_ela:.5f}"
+    # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
+    ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') # Default placeholder
+    if model_ela is None:
+        ela_error_val = 1.0 # Failure flag
+    else:
+        with st.spinner('Calculating Error Level Analysis (ELA)...'):
+            ela_pil_temp = calculate_ela(pil_image)
+        
+        if ela_pil_temp is None:
+            ela_error_val = 1.0 # ELA calculation failed flag
         else:
-            verdict_ela = f"REAL (Consistent Compression)\nError: {error_ela:.5f}"
+            ela_pil = ela_pil_temp
+            with st.spinner('Running ELA Autoencoder Reconstruction...'):
+                # 2. Predict with Autoencoder
+                input_ela = preprocess_ela(ela_pil)
+                reconstructed_ela = model_ela.predict(input_ela, verbose=0)
+                error_ela = np.mean(np.square(input_ela - reconstructed_ela))
+                ela_error_val = error_ela
 
-    # C. GET COMBINED VERDICT STRING (Pass error_raw and error_ela to the new function)
-    overall_verdict_string = get_overall_verdict(
-        error_raw, error_ela, THRESHOLD_RAW, THRESHOLD_ELA
+    # --- COMBINED VERDICT ---
+    final_verdict_str = get_overall_verdict(
+        error_raw=anomaly_score, 
+        error_ela=ela_error_val, 
+        threshold_raw=THRESHOLD_IF_ANOMALY, 
+        threshold_ela=THRESHOLD_ELA
     )
-    
-    # D. RETURN ALL NECESSARY ITEMS FOR THE DISPLAY
-    return original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string
+        
+    return final_verdict_str, ela_pil
 
-# --- 5. STREAMLIT INTERFACE (RESTORED TO TWO-COLUMN DISPLAY)  ---
-st.title("Anomaly-Based Detection of Synthetic Human Image")
 
-# Create the Navigation Sidebar
-st.sidebar.title("Navigation")
-st.sidebar.radio( 
-    "Go to",
-    ["Welcome", "Image Scanner"], 
-    key='page'
-)
+# ==========================================
+# 5. BUILD INTERFACE
+# ==========================================
 
-# Conditional Page Display Logic
-if st.session_state['page'] == "Welcome":
-    # --- WELCOME PAGE ---
-    st.markdown("""
-    Our website performs a two-step scan for **AI Generation** and **Digital Manipulation**.
+st.title("🕵️‍♂️ Anomaly-Based Synthetic Human Detector")
+st.markdown("""
+This system uses a **Multi-Layered Approach** to detect anomalies:
+1.  **Feature Analysis (VGG16 + Isolation Forest):** Checks for AI generation patterns.
+2.  **Compression Analysis (ELA + Autoencoder):** Checks for post-processing/manipulation (e.g., Photoshop).
+""")
 
-    * *AI Generation Check:* Identifies images created by AI models (like Midjourney or DALL-E).
-    * *Manipulation Check (ELA):* Detects inconsistent compression—the telltale sign of Photoshop or editing software.
-    """)
+with st.expander("Model Loading Status & Configuration"):
+    for msg in loading_feedback:
+        st.write(msg)
+    st.markdown(f"***ELA Error Threshold:*** `{THRESHOLD_ELA}`")
+    st.markdown(f"***AI Score Threshold:*** `{THRESHOLD_IF_ANOMALY}` (Score less than this is ANOMALY)")
 
-    st.markdown("---")
 
-    # BUTTON
-    st.subheader("Ready to Scan an Image?")
-    st.button(
-        "Image Scanner", 
-        type="primary", 
-        use_container_width=True, 
-        on_click=lambda: st.session_state.update(page="Image Scanner")) 
+# --- INPUT SECTION (Made larger using a container and large header) ---
 
-    st.markdown("---")
-
-elif st.session_state['page'] == "Image Scanner":
-    # --- SCANNER PAGE ---
-    st.markdown("Upload an image to check for **AI Generation** and **Photoshop Manipulation**.")
-
-    uploaded_file = st.file_uploader("Upload Image", type=["jpg", "jpeg", "png", "webp", "tiff", "tif"])
+st.markdown("## ⬆️ Image Upload and Scan") # Larger header
+with st.container(border=True):
+    uploaded_file = st.file_uploader(
+        "Upload Image (JPG, JPEG, PNG, WEBP, TIFF)", 
+        type=["jpg", "jpeg", "png", "webp", "tiff", "tif"],
+        help="Drag and drop your image file here to begin analysis."
+    )
 
     if uploaded_file is not None:
-        st.subheader("Image Preview:")
-        st.image(uploaded_file, caption=uploaded_file.name, use_column_width=False, width=300)
-        st.markdown("---")
+        # Convert Streamlit UploadedFile to PIL Image
+        pil_img = Image.open(uploaded_file)
         
-        uploaded_file.seek(0) 
+        # Display Preview
+        st.image(pil_img, caption="Preview: Input Image Ready for Scan", use_column_width=True)
 
-        if st.button("Scan Image", type="primary", use_container_width=True):
-            if model_raw is None or model_ela is None:
-                st.warning("Cannot run scan: Models failed to load. Check console for details.")
-            else:
-                # Use st.spinner for user feedback during processing
-                with st.spinner('Analyzing image... This may take a moment.'):
- 
-                    # RESTORED: Captures all 5 returned variables
-                    original_pil, verdict_raw, ela_pil, verdict_ela, overall_verdict_string = predict_image(
-                    uploaded_file, model_raw, model_ela
-                )
-                    
-
-                   # --- Display Results in two columns ---
-                    st.markdown("---")
-                    col1, col2 = st.columns(2)
-
-                   # Column 1: AI Generation Scan (Raw Image)
-                    with col1:
-                       st.subheader("1. AI Generation Scan (Raw Image)")
-                       st.image(original_pil, caption="Original Image", use_column_width=True)
-
-                    # Column 2: Manipulation Scan (ELA)
-                    with col2:
-                        st.subheader("2. Manipulation Scan (ELA Map)")
-
-                        if ela_pil:
-                            st.image(ela_pil, caption="ELA Map (White indicates differences)", use_column_width=True)
-                        else:
-                            st.warning("ELA Map generation failed.")
-                
-                            
-                    # --- DISPLAY THE COMBINED VERDICT BELOW THE COLUMNS ---
-                    st.markdown("---")
-                    st.subheader("Verdict")
+        # Button is placed next to the image preview
+        if st.button("🔍 Start Full Scan", type="primary"):
             
-                    # Display the combined string that contains both results and both errors
-                    st.code(overall_verdict_string, language=None)
+            # Run prediction
+            final_verdict_str, ela_pil = predict_image_streamlit(pil_img)
+
+            st.markdown("---")
+            st.header("Final Scan Results")
+            
+            # Display the single, combined verdict
+            # Check for 'REAL' or 'ANOMALY' to determine the alert box color
+            if "ANOMALY" in final_verdict_str:
+                st.error(final_verdict_str)
+            elif "REAL" in final_verdict_str:
+                st.success(final_verdict_str)
+            else:
+                st.info(final_verdict_str)
+
+
+            st.markdown("---")
+            
+            # --- OUTPUT DISPLAY ---
+            col1, col2 = st.columns(2)
+
+            # COLUMN 1: AI GENERATION DETAILS
+            with col1:
+                st.subheader("🤖 Layer 1: AI Generation Details")
+                st.markdown(f"VGG16-extracted features are passed to the Isolation Forest model to detect feature-space anomalies associated with synthetic content. (Threshold: `{THRESHOLD_IF_ANOMALY:.4f}`)")
+
+
+            # COLUMN 2: MANIPULATION CHECK DETAILS
+            with col2:
+                st.subheader("🖌️ Layer 2: Manipulation Check Details")
+                st.markdown(f"Error Level Analysis (ELA) map shows non-uniform compression levels. The Autoencoder measures the reconstruction error to detect tampering. (Threshold: `{THRESHOLD_ELA:.4f}`)")
+
+                st.subheader("ELA Analysis Map")
+                st.image(ela_pil, caption="ELA Image (Higher variance/brightness suggests manipulation)", use_column_width=True)
+            
+    else:
+        st.info("Please upload an image to begin the scan.")
