@@ -14,6 +14,10 @@ THRESHOLD_ELA = 0.004158
 # Threshold for Isolation Forest (Anomaly Score). Score < Threshold is ANOMALY.
 THRESHOLD_IF_ANOMALY = -0.1 
 
+# Define specific flag values for model failure detection in the verdict logic
+IF_FAIL_FLAG = -100.0
+ELA_FAIL_FLAG = 1.0 
+
 IMG_HEIGHT, IMG_WIDTH = 128, 128
 
 # Set up the Streamlit page configuration
@@ -29,34 +33,33 @@ st.set_page_config(
 
 @st.cache_resource
 def load_models():
-    """Loads all ML models and assets using Streamlit caching."""
+    """Loads all ML models and assets using Streamlit caching and absolute paths."""
     
-    # Initialize containers for feedback
     loading_messages = []
     
+    # Define base path relative to this script for robust file lookup
+    base_path = os.path.abspath(os.path.dirname(__file__))
+
     # A. Load the Isolation Forest
     joblib_filename = 'isolation_forest.joblib'
+    joblib_full_path = os.path.join(base_path, joblib_filename)
     try:
-        # Check the current working directory path for debugging
-        current_dir = os.getcwd()
-        full_path = os.path.join(current_dir, joblib_filename)
-        
-        clf = joblib.load(joblib_filename)
-        loading_messages.append(f"✅ Isolation Forest loaded from: {full_path}")
+        clf = joblib.load(joblib_full_path)
+        loading_messages.append(f"Isolation Forest loaded from: {joblib_full_path}")
     except Exception as e:
         clf = None
-        loading_messages.append(f"   ERROR: '{joblib_filename}' not found. AI detection will be skipped. Tried path: {full_path}")
+        loading_messages.append(f"ERROR: '{joblib_filename}' not found. AI detection will be skipped. Tried path: {joblib_full_path}")
         loading_messages.append(f"   Details: {e}")
 
     # B. Load VGG16 Feature Extractor (Using the uploaded file vgg16_extractor.h5)
     vgg_filename = 'vgg16_extractor.h5'
+    vgg_full_path = os.path.join(base_path, vgg_filename)
     try:
-        full_path = os.path.join(os.getcwd(), vgg_filename)
-        feature_extractor = tf.keras.models.load_model(vgg_filename)
-        loading_messages.append(f"VGG16 Feature Extractor loaded from: {full_path}")
+        feature_extractor = tf.keras.models.load_model(vgg_full_path)
+        loading_messages.append(f"VGG16 Feature Extractor loaded from: {vgg_full_path}")
     except Exception as e:
         # Fallback to re-building if the file is missing/corrupt
-        loading_messages.append(f"⚠️ WARNING: '{vgg_filename}' not found/loaded. Re-building VGG16 from Keras defaults.")
+        loading_messages.append(f"WARNING: '{vgg_filename}' not found/loaded. Re-building VGG16 from Keras defaults.")
         try:
             base_model = tf.keras.applications.VGG16(
                 weights='imagenet', 
@@ -76,14 +79,14 @@ def load_models():
 
     # C. Load the ELA Autoencoder
     h5_filename = 'model_ela.h5'
+    h5_full_path = os.path.join(base_path, h5_filename)
     try:
-        full_path = os.path.join(os.getcwd(), h5_filename)
-        model_ela = tf.keras.models.load_model(h5_filename)
-        loading_messages.append(f"ELA Model loaded from: {full_path}")
+        model_ela = tf.keras.models.load_model(h5_full_path)
+        loading_messages.append(f"ELA Model loaded from: {h5_full_path}")
     except Exception as e:
         model_ela = None
-        loading_messages.append(f"ERROR: '{h5_filename}' not found. Manipulation detection will be skipped. Tried path: {full_path}")
-        loading_messages.append(f"Details: {e}")
+        loading_messages.append(f"ERROR: '{h5_filename}' not found. Manipulation detection will be skipped. Tried path: {h5_full_path}")
+        loading_messages.append(f"   Details: {e}")
         
     return clf, feature_extractor, model_ela, loading_messages
 
@@ -141,7 +144,7 @@ def preprocess_ela(ela_pil):
 def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
     """
     Generates a consolidated verdict string matching the user's requested compact format,
-    including scores for all cases.
+    handling model failures explicitly and including scores for all cases.
     """
     
     is_raw_anomaly = error_raw < threshold_raw 
@@ -150,36 +153,42 @@ def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
     raw_score_str = f"{error_raw:.5f}"
     ela_error_str = f"{error_ela:.5f}"
     
-    # Handle ELA failure first (1.0 is the flag for model/data error)
-    if error_ela == 1.0: 
+    # --- Check for Model Failures ---
+    if error_raw == IF_FAIL_FLAG and error_ela == ELA_FAIL_FLAG:
+        return "CRITICAL FAILURE: Both AI and Manipulation models failed to load."
+    if error_raw == IF_FAIL_FLAG: 
+        # This occurs if IF model or VGG failed to load
+        return "SCAN FAILURE: AI Detection model failed to load."
+    if error_ela == ELA_FAIL_FLAG: 
+        # This occurs if ELA model failed to load or ELA calculation failed
         return "SCAN FAILURE: ELA Calculation Failed. Check model files."
         
     # --- Case 1: BOTH REAL ---
     if not is_raw_anomaly and not is_ela_anomaly:
         return (
-            f"      REAL (NATURAL PIXELS) ERROR: {raw_score_str}\n"
-            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}" # Added ELA score
+            f"REAL (NATURAL PIXELS) ERROR: {raw_score_str}\n" 
+            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}"
         )
         
     # --- Case 2: F RAW, R ELA (AI Anomaly Only) ---
     if is_raw_anomaly and not is_ela_anomaly:
         return (
-            f"      ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n" # Added RAW score
-            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}" # Added ELA score for consistency
+            f"ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n" 
+            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}"
         )
         
     # --- Case 3: R RAW, F ELA (Manipulation Anomaly Only) ---
     if not is_raw_anomaly and is_ela_anomaly:
         return (
-            f"      ANOMALY (MANIPULATED) ERROR: {ela_error_str}\n" # Added ELA score
-            f"		(NATURAL PIXELS) ERROR: {raw_score_str}" # Added RAW score for consistency
+            f"ANOMALY (MANIPULATED) ERROR: {ela_error_str}\n" 
+            f"		(NATURAL PIXELS) ERROR: {raw_score_str}"
         )
         
     # --- Case 4: F BOTH (AI and Manipulation Anomalies) ---
     if is_raw_anomaly and is_ela_anomaly:
         return (
-            f"ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n" # Added RAW score
-            f"(MANIPULATED) ERROR: {ela_error_str}" # Added ELA score
+            f"ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n" 
+            f"	(MANIPULATED) ERROR: {ela_error_str}"
         )
 
     # Fallback (shouldn't happen)
@@ -191,17 +200,14 @@ def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
 # ==========================================
 
 def predict_image_streamlit(pil_image):
-    # This value is passed to get_overall_verdict
-    ela_error_val = 1.0 # Default to failure flag 
-    anomaly_score = 0.5 # Default score for skipping/normal
+    # Use failure flags as initial values
+    ela_error_val = ELA_FAIL_FLAG
+    anomaly_score = IF_FAIL_FLAG
 
     # --- TEST 1: AI GENERATION CHECK (VGG16 + IF) ---
-    if clf is None:
-        st.warning("Skipping AI Detection: Isolation Forest model failed to load.")
-        anomaly_score = 0.5 
-    elif feature_extractor is None:
-        st.warning("Skipping AI Detection: Feature Extractor failed to load.")
-        anomaly_score = 0.5 
+    if clf is None or feature_extractor is None:
+        st.warning("Skipping AI Detection: Isolation Forest or Feature Extractor model failed to load.")
+        # anomaly_score remains IF_FAIL_FLAG
     else:
         with st.spinner('Running VGG16 Feature Extraction...'):
             # 1. Extract Features
@@ -215,14 +221,15 @@ def predict_image_streamlit(pil_image):
     # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
     ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') # Default placeholder
     if model_ela is None:
-        ela_error_val = 1.0 # Failure flag
+        # ela_error_val remains ELA_FAIL_FLAG
         st.warning("Skipping Manipulation Check: ELA Autoencoder model failed to load.")
     else:
         with st.spinner('Calculating Error Level Analysis (ELA)...'):
             ela_pil_temp = calculate_ela(pil_image)
         
         if ela_pil_temp is None:
-            ela_error_val = 1.0 # ELA calculation failed flag
+            # ela_error_val remains ELA_FAIL_FLAG
+            pass # Keep default ELA_FAIL_FLAG
         else:
             ela_pil = ela_pil_temp
             with st.spinner('Running ELA Autoencoder Reconstruction...'):
@@ -247,7 +254,7 @@ def predict_image_streamlit(pil_image):
 # 5. BUILD INTERFACE
 # ==========================================
 
-st.title("Anomaly-Based Synthetic Human Detector")
+st.title("Anomaly-Based Synthetic Human Detector") 
 st.markdown("""
 This system uses a **Multi-Layered Approach** to detect anomalies:
 1.  **Feature Analysis (VGG16 + Isolation Forest):** Checks for AI generation patterns.
@@ -255,12 +262,9 @@ This system uses a **Multi-Layered Approach** to detect anomalies:
 """)
 
 
-# NOTE: Removed the st.expander("Model Loading Status & Configuration") section
-
-
 # --- INPUT SECTION (Made larger using a container and large header) ---
 
-st.markdown("##Image Upload and Scan") # Larger header
+st.markdown("## **Image Upload and Scan**") 
 with st.container(border=True):
     uploaded_file = st.file_uploader(
         "Upload Image (JPG, JPEG, PNG, WEBP, TIFF)", 
@@ -276,7 +280,7 @@ with st.container(border=True):
         st.image(pil_img, caption="Preview: Input Image Ready for Scan", use_container_width=True) 
 
         # Button is placed next to the image preview
-        if st.button("🔍 Start Full Scan", type="primary"):
+        if st.button("Start Full Scan", type="primary"): 
             
             # Run prediction
             final_verdict_str, ela_pil = predict_image_streamlit(pil_img)
@@ -285,8 +289,7 @@ with st.container(border=True):
             st.header("Final Scan Results")
             
             # Display the single, combined verdict
-            # Check for 'REAL' or 'ANOMALY' or 'FAILURE' to determine the alert box color
-            if "ANOMALY" in final_verdict_str or "FAILURE" in final_verdict_str:
+            if "ANOMALY" in final_verdict_str or "FAILURE" in final_verdict_str or "CRITICAL" in final_verdict_str:
                 st.error(final_verdict_str)
             elif "REAL" in final_verdict_str:
                 st.success(final_verdict_str)
@@ -301,17 +304,14 @@ with st.container(border=True):
 
             # COLUMN 1: AI GENERATION DETAILS
             with col1:
-                st.subheader("Layer 1: AI Generation Details")
-                st.markdown(f"VGG16-extracted features are passed to the Isolation Forest model to detect feature-space anomalies associated with synthetic content. (Threshold: `{THRESHOLD_IF_ANOMALY:.4f}`)")
-                st.subheader("Input Image")
-                # Image added back into the Layer 1 column for visual consistency with original Gradio app
+                st.subheader("Layer 1: AI Generation Details") 
+                st.markdown("VGG16-extracted features are passed to the Isolation Forest model to detect feature-space anomalies associated with synthetic content.")
+                st.subheader("Input Image") 
                 st.image(pil_img, caption="Input Image (for feature analysis)", use_container_width=True)
                 
-
-
             # COLUMN 2: MANIPULATION CHECK DETAILS
             with col2:
-                st.subheader("Layer 2: Manipulation Check Details")
+                st.subheader("Layer 2: Manipulation Check Details") 
                 st.markdown(f"Error Level Analysis (ELA) map shows non-uniform compression levels. The Autoencoder measures the reconstruction error to detect tampering. (Threshold: `{THRESHOLD_ELA:.4f}`)")
 
                 st.subheader("ELA Analysis Map")
