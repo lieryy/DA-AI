@@ -3,4 +3,4 @@ tensorflow
 numpy
 pillow
 joblib
-scikit-learn==1.x.x
+scikit-learn
