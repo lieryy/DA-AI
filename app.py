@@ -242,7 +242,7 @@ with st.container(border=True):
         st.markdown("### Detection Settings")
         sensitivity = st.slider(
             "AI Detection Sensitivity", 
-            min_value=0.00, 
+            min_value=-0.10, 
             max_value=0.20, 
             value=0.00, 
             step=0.01,
@@ -253,7 +253,7 @@ with st.container(border=True):
         if st.button("🔍 Start Full Scan", type="primary"):
             
             # Run prediction (Now receiving heatmap_pil too)
-            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil = predict_image_streamlit(pil_img, sensitivity)
+            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil = predict_image_streamlit(pil_img)
 
             st.markdown("---")
             st.header("Final Scan Results")
