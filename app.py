@@ -46,7 +46,7 @@ def load_models():
         loading_messages.append(f"   ERROR: '{joblib_filename}' not found. AI detection will be skipped. Tried path: {full_path}")
         loading_messages.append(f"   Details: {e}")
 
-    # B. Load VGG16 Feature Extractor
+    # B. Load VGG16 Feature Extractor (Using the uploaded file vgg16_extractor.h5)
     vgg_filename = 'vgg16_extractor.h5'
     try:
         full_path = os.path.join(os.getcwd(), vgg_filename)
@@ -135,92 +135,67 @@ def preprocess_ela(ela_pil):
     img_batch = np.expand_dims(img_array, axis=0)
     return img_batch
     
+
 # ==========================================
 # 4. MAIN PREDICTION LOGIC
 # ==========================================
 
 def predict_image_streamlit(pil_image):
     
-    # Defaults
+    # Initialize default results
+    verdict_ai = "Waiting..."
+    verdict_manipulation = "Waiting..."
     is_ai_anomaly = False
     is_manipulated = False
-    ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') 
-    error_ela = 0.0
+    ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') # Placeholder
 
     # --- TEST 1: AI GENERATION CHECK (VGG16 + IF) ---
-    if clf is None or feature_extractor is None:
-        st.warning("Skipping AI Detection: Model failed to load.")
+    if clf is None:
+        st.warning("Skipping AI Detection: Isolation Forest model failed to load.")
+    elif feature_extractor is None:
+        st.warning("Skipping AI Detection: Feature Extractor failed to load.")
     else:
         with st.spinner('Running VGG16 Feature Extraction...'):
+            # 1. Extract Features
             img_batch_vgg = preprocess_image(pil_image)
             features = feature_extractor.predict(img_batch_vgg, verbose=0)
             
         with st.spinner('Running Isolation Forest Anomaly Detection...'):
-            # Predict returns: 1 (Real) or -1 (Anomaly)
+            # 2. Predict with Isolation Forest (1 = Real, -1 = Anomaly)
             pred = clf.predict(features)[0]
+            
             if pred == -1:
+                verdict_ai = "⚠️ ANOMALY DETECTED (Possible AI)"
                 is_ai_anomaly = True
             else:
+                verdict_ai = "✅ REAL (Matches Human Features)"
                 is_ai_anomaly = False
 
     # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
     if model_ela is None:
-        st.warning("Skipping Manipulation Check: Model failed to load.")
-        error_ela = 1.0 # Error flag
+        st.warning("Skipping Manipulation Check: ELA Autoencoder model failed to load.")
     else:
         with st.spinner('Calculating Error Level Analysis (ELA)...'):
             ela_pil_temp = calculate_ela(pil_image)
         
         if ela_pil_temp is None:
-            error_ela = 1.0
+            verdict_manipulation = "SCAN FAILURE: ELA Calculation Failed."
         else:
             ela_pil = ela_pil_temp
             with st.spinner('Running ELA Autoencoder Reconstruction...'):
+                # 2. Predict with Autoencoder
                 input_ela = preprocess_ela(ela_pil)
                 reconstructed_ela = model_ela.predict(input_ela, verbose=0)
                 error_ela = np.mean(np.square(input_ela - reconstructed_ela))
                 
                 if error_ela > THRESHOLD_ELA:
+                    verdict_manipulation = f"⚠️ ANOMALY DETECTED (Manipulated)\nError: {error_ela:.5f}"
                     is_manipulated = True
                 else:
+                    verdict_manipulation = f"✅ REAL (Original Compression)\nError: {error_ela:.5f}"
                     is_manipulated = False
-    
-    # --- CONSTRUCT COMBINED VERDICT STRING ---
-    # Logic matching your request:
-    ela_str = f"{error_ela:.5f}"
-    
-    if error_ela == 1.0:
-        final_verdict = "SCAN FAILURE: ELA Calculation Failed."
-    
-    # Case 1: BOTH REAL
-    elif not is_ai_anomaly and not is_manipulated:
-        final_verdict = (
-            f"REAL (NATURAL PIXELS)\n"
-            f"(CONSISTENT COMPRESSION) ELA ERROR: {ela_str}"
-        )
         
-    # Case 2: AI ANOMALY ONLY
-    elif is_ai_anomaly and not is_manipulated:
-        final_verdict = (
-            f"ANOMALY (POSSIBLE AI)\n"
-            f"(CONSISTENT COMPRESSION) ELA ERROR: {ela_str}"
-        )
-
-    # Case 3: MANIPULATION ANOMALY ONLY
-    elif not is_ai_anomaly and is_manipulated:
-        final_verdict = (
-            f"ANOMALY (MANIPULATED)\n"
-            f"(NATURAL PIXELS) ELA ERROR: {ela_str}"
-        )
-
-    # Case 4: BOTH ANOMALIES
-    elif is_ai_anomaly and is_manipulated:
-        final_verdict = (
-            f"ANOMALY (POSSIBLE AI)\n"
-            f"(MANIPULATED) ELA ERROR: {ela_str}"
-        )
-        
-    return final_verdict, ela_pil, is_ai_anomaly, is_manipulated
+    return verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated
 
 
 # ==========================================
@@ -245,38 +220,53 @@ with st.container(border=True):
     )
 
     if uploaded_file is not None:
+        # Convert Streamlit UploadedFile to PIL Image
         pil_img = Image.open(uploaded_file)
+        
+        # Display Preview
         st.image(pil_img, caption="Preview: Input Image Ready for Scan", use_container_width=True) 
 
+        # Button is placed next to the image preview
         if st.button("🔍 Start Full Scan", type="primary"):
             
             # Run prediction
-            final_verdict, ela_pil, is_ai, is_manip = predict_image_streamlit(pil_img)
+            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated = predict_image_streamlit(pil_img)
 
             st.markdown("---")
             st.header("Final Scan Results")
             
-            # --- COMBINED RESULT DISPLAY ---
-            # Determine color based on whether ANY anomaly exists
-            if is_ai or is_manip:
-                st.error(final_verdict)
-            elif "FAILURE" in final_verdict:
-                st.warning(final_verdict)
-            else:
-                st.success(final_verdict)
-            
-            st.markdown("---")
-            
-            # --- VISUAL DISPLAY ---
+            # --- OUTPUT DISPLAY ---
             col1, col2 = st.columns(2)
 
+            # COLUMN 1: AI GENERATION DETAILS
             with col1:
-                st.subheader("Layer 1: AI Analysis")
-                st.image(pil_img, caption="Input Image Features (VGG16)", use_container_width=True)
+                st.subheader("Layer 1: AI Generation Scan")
+                
+                # Display Verdict with conditional formatting
+                if is_ai_anomaly:
+                    st.error(verdict_ai)
+                elif "REAL" in verdict_ai:
+                    st.success(verdict_ai)
+                else:
+                    st.info(verdict_ai)
+                
+                st.markdown("**Visual:**")
+                st.image(pil_img, caption="Input Image (VGG16 Features Analyzed)", use_container_width=True)
                 
 
+            # COLUMN 2: MANIPULATION CHECK DETAILS
             with col2:
-                st.subheader("Layer 2: Manipulation Analysis")
+                st.subheader("Layer 2: Manipulation Scan")
+                
+                # Display Verdict with conditional formatting
+                if is_manipulated:
+                    st.error(verdict_manipulation)
+                elif "REAL" in verdict_manipulation:
+                    st.success(verdict_manipulation)
+                else:
+                    st.info(verdict_manipulation)
+
+                st.markdown("**Visual:**")
                 st.image(ela_pil, caption="ELA Analysis Map", use_container_width=True) 
             
     else:
