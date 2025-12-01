@@ -12,7 +12,7 @@ import os
 # Threshold for ELA Model (Reconstruction Error)
 THRESHOLD_ELA = 0.004158
 
-IMG_HEIGHT, IMG_WIDTH = 128, 128
+IMG_HEIGHT, IMG_WIDTH = 224, 224
 
 # Set up the Streamlit page configuration
 st.set_page_config(
@@ -148,6 +148,7 @@ def predict_image_streamlit(pil_image):
     is_ai_anomaly = False
     is_manipulated = False
     ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') # Placeholder
+    heatmap_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='black') # Placeholder for Heatmap
 
     # --- TEST 1: AI GENERATION CHECK (VGG16 + IF) ---
     if clf is None:
@@ -161,14 +162,20 @@ def predict_image_streamlit(pil_image):
             features = feature_extractor.predict(img_batch_vgg, verbose=0)
             
         with st.spinner('Running Isolation Forest Anomaly Detection...'):
-            # 2. Predict with Isolation Forest (1 = Real, -1 = Anomaly)
+            # 2. Predict Verdict and Score
             pred = clf.predict(features)[0]
             
+            # ### NEW CODE: Get the raw Anomaly Score ###
+            # Negative = Anomaly, Positive = Real
+            raw_score = clf.decision_function(features)[0]
+            confidence = abs(raw_score) # How far from the "border" are we?
+            
             if pred == -1:
-                verdict_ai = "⚠️ ANOMALY DETECTED (Possible AI)"
+                # We include the score in the verdict text
+                verdict_ai = f"⚠️ ANOMALY DETECTED (Possible AI)\nConfidence Score: {confidence:.4f}"
                 is_ai_anomaly = True
             else:
-                verdict_ai = "✅ REAL (Matches Human Features)"
+                verdict_ai = f"✅ REAL (Matches Human Features)\nConfidence Score: {confidence:.4f}"
                 is_ai_anomaly = False
 
     # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
@@ -188,6 +195,14 @@ def predict_image_streamlit(pil_image):
                 reconstructed_ela = model_ela.predict(input_ela, verbose=0)
                 error_ela = np.mean(np.square(input_ela - reconstructed_ela))
                 
+                # ### NEW CODE: Generate Heatmap ###
+                # Calculate absolute difference between Input and Reconstruction
+                diff = np.abs(input_ela[0] - reconstructed_ela[0])
+                diff = np.mean(diff, axis=-1) # Grayscale
+                diff = (diff * 255).astype(np.uint8) # Scale up
+                heatmap_pil = Image.fromarray(diff).resize((IMG_WIDTH, IMG_HEIGHT))
+                # ### END NEW CODE ###
+                
                 if error_ela > THRESHOLD_ELA:
                     verdict_manipulation = f"⚠️ ANOMALY DETECTED (Manipulated)\nError: {error_ela:.5f}"
                     is_manipulated = True
@@ -195,7 +210,8 @@ def predict_image_streamlit(pil_image):
                     verdict_manipulation = f"✅ REAL (Original Compression)\nError: {error_ela:.5f}"
                     is_manipulated = False
         
-    return verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated
+    # Return the heatmap as well
+    return verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil
 
 
 # ==========================================
@@ -229,8 +245,8 @@ with st.container(border=True):
         # Button is placed next to the image preview
         if st.button("🔍 Start Full Scan", type="primary"):
             
-            # Run prediction
-            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated = predict_image_streamlit(pil_img)
+            # Run prediction (Now receiving heatmap_pil too)
+            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil = predict_image_streamlit(pil_img)
 
             st.markdown("---")
             st.header("Final Scan Results")
@@ -266,8 +282,17 @@ with st.container(border=True):
                 else:
                     st.info(verdict_manipulation)
 
-                st.markdown("**Visual:**")
-                st.image(ela_pil, caption="ELA Analysis Map", use_container_width=True) 
+                # Display BOTH ELA and Heatmap side-by-side or stacked
+                st.markdown("**Forensic Visuals:**")
+                
+                # Using tabs for cleaner look
+                tab1, tab2 = st.tabs(["ELA Map (Evidence)", "Anomaly Heatmap (Verdict)"])
+                
+                with tab1:
+                    st.image(ela_pil, caption="Raw Compression Artifacts", use_container_width=True)
+                
+                with tab2:
+                    st.image(heatmap_pil, caption="Glowing Areas indicate Manipulation", use_container_width=True)
             
     else:
         st.info("Please upload an image to begin the scan.")
