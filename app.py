@@ -12,7 +12,7 @@ import os
 # Threshold for ELA Model (Reconstruction Error)
 THRESHOLD_ELA = 0.004158
 
-IMG_HEIGHT, IMG_WIDTH = 128, 128
+IMG_HEIGHT, IMG_WIDTH = 224, 224
 
 # Set up the Streamlit page configuration
 st.set_page_config(
