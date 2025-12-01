@@ -11,8 +11,6 @@ import os
 # ==========================================
 # Threshold for ELA Model (Reconstruction Error)
 THRESHOLD_ELA = 0.004158
-# Threshold for Isolation Forest (Anomaly Score). Score < Threshold is ANOMALY.
-THRESHOLD_IF_ANOMALY = -0.1 
 
 IMG_HEIGHT, IMG_WIDTH = 128, 128
 
@@ -137,71 +135,25 @@ def preprocess_ela(ela_pil):
     img_batch = np.expand_dims(img_array, axis=0)
     return img_batch
     
-# --- NEW FUNCTION FOR COMBINED VERDICT  ---
-def get_overall_verdict(error_raw, error_ela, threshold_raw, threshold_ela):
-    """
-    Generates a consolidated verdict string matching the user's requested compact format,
-    including scores for all cases.
-    """
-    
-    is_raw_anomaly = error_raw < threshold_raw 
-    is_ela_anomaly = error_ela > threshold_ela
-    
-    raw_score_str = f"{error_raw:.5f}"
-    ela_error_str = f"{error_ela:.5f}"
-    
-    # Handle ELA failure first (1.0 is the flag for model/data error)
-    if error_ela == 1.0: 
-        return "SCAN FAILURE: ELA Calculation Failed. Check model files."
-        
-    # --- Case 1: BOTH REAL ---
-    if not is_raw_anomaly and not is_ela_anomaly:
-        return (
-            f"      REAL (NATURAL PIXELS) ERROR: {raw_score_str}\n"
-            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}" # Added ELA score
-        )
-        
-    # --- Case 2: F RAW, R ELA (AI Anomaly Only) ---
-    if is_raw_anomaly and not is_ela_anomaly:
-        return (
-            f"      ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n" # Added RAW score
-            f"		(CONSISTENT COMPRESSION) ERROR: {ela_error_str}" # Added ELA score for consistency
-        )
-        
-    # --- Case 3: R RAW, F ELA (Manipulation Anomaly Only) ---
-    if not is_raw_anomaly and is_ela_anomaly:
-        return (
-            f"      ANOMALY (MANIPULATED) ERROR: {ela_error_str}\n" # Added ELA score
-            f"		(NATURAL PIXELS) ERROR: {raw_score_str}" # Added RAW score for consistency
-        )
-        
-    # --- Case 4: F BOTH (AI and Manipulation Anomalies) ---
-    if is_raw_anomaly and is_ela_anomaly:
-        return (
-            f"ANOMALY (POSSIBLE AI) ERROR: {raw_score_str}\n" # Added RAW score
-            f"(MANIPULATED) ERROR: {ela_error_str}" # Added ELA score
-        )
-
-    # Fallback (shouldn't happen)
-    return "UNKNOWN VERDICT STATE"
-
 
 # ==========================================
 # 4. MAIN PREDICTION LOGIC
 # ==========================================
 
 def predict_image_streamlit(pil_image):
-    # This value is passed to get_overall_verdict
-    ela_error_val = 1.0 # Default to failure flag 
-    anomaly_score = 0.5 # Default score for skipping/normal
+    
+    # Initialize default results
+    verdict_ai = "Waiting..."
+    verdict_manipulation = "Waiting..."
+    is_ai_anomaly = False
+    is_manipulated = False
+    ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') # Placeholder
 
     # --- TEST 1: AI GENERATION CHECK (VGG16 + IF) ---
     if clf is None:
         st.warning("Skipping AI Detection: Isolation Forest model failed to load.")
-        anomaly_score = 0.5 
     elif feature_extractor is None:
         st.warning("Skipping AI Detection: Feature Extractor failed to load.")
-        anomaly_score = 0.5 
     else:
         with st.spinner('Running VGG16 Feature Extraction...'):
             # 1. Extract Features
@@ -209,20 +161,25 @@ def predict_image_streamlit(pil_image):
             features = feature_extractor.predict(img_batch_vgg, verbose=0)
             
         with st.spinner('Running Isolation Forest Anomaly Detection...'):
-            # 2. Calculate Anomaly Score (Raw Error)
-            anomaly_score = clf.decision_function(features)[0] 
+            # 2. Predict with Isolation Forest (1 = Real, -1 = Anomaly)
+            pred = clf.predict(features)[0]
+            
+            if pred == -1:
+                verdict_ai = "⚠️ ANOMALY DETECTED (Possible AI)"
+                is_ai_anomaly = True
+            else:
+                verdict_ai = "✅ REAL (Matches Human Features)"
+                is_ai_anomaly = False
 
     # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
-    ela_pil = Image.new('RGB', (IMG_WIDTH, IMG_HEIGHT), color='gray') # Default placeholder
     if model_ela is None:
-        ela_error_val = 1.0 # Failure flag
         st.warning("Skipping Manipulation Check: ELA Autoencoder model failed to load.")
     else:
         with st.spinner('Calculating Error Level Analysis (ELA)...'):
             ela_pil_temp = calculate_ela(pil_image)
         
         if ela_pil_temp is None:
-            ela_error_val = 1.0 # ELA calculation failed flag
+            verdict_manipulation = "SCAN FAILURE: ELA Calculation Failed."
         else:
             ela_pil = ela_pil_temp
             with st.spinner('Running ELA Autoencoder Reconstruction...'):
@@ -230,17 +187,15 @@ def predict_image_streamlit(pil_image):
                 input_ela = preprocess_ela(ela_pil)
                 reconstructed_ela = model_ela.predict(input_ela, verbose=0)
                 error_ela = np.mean(np.square(input_ela - reconstructed_ela))
-                ela_error_val = error_ela
-
-    # --- COMBINED VERDICT ---
-    final_verdict_str = get_overall_verdict(
-        error_raw=anomaly_score, 
-        error_ela=ela_error_val, 
-        threshold_raw=THRESHOLD_IF_ANOMALY, 
-        threshold_ela=THRESHOLD_ELA
-    )
+                
+                if error_ela > THRESHOLD_ELA:
+                    verdict_manipulation = f"⚠️ ANOMALY DETECTED (Manipulated)\nError: {error_ela:.5f}"
+                    is_manipulated = True
+                else:
+                    verdict_manipulation = f"✅ REAL (Original Compression)\nError: {error_ela:.5f}"
+                    is_manipulated = False
         
-    return final_verdict_str, ela_pil
+    return verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated
 
 
 # ==========================================
@@ -254,13 +209,9 @@ This system uses a **Multi-Layered Approach** to detect anomalies:
 2.  **Compression Analysis (ELA + Autoencoder):** Checks for post-processing/manipulation (e.g., Photoshop).
 """)
 
+# --- INPUT SECTION ---
 
-# NOTE: Removed the st.expander("Model Loading Status & Configuration") section
-
-
-# --- INPUT SECTION (Made larger using a container and large header) ---
-
-st.markdown("##**Image Upload and Scan**") # Larger header
+st.markdown("## **Image Upload and Scan**")
 with st.container(border=True):
     uploaded_file = st.file_uploader(
         "Upload Image (JPG, JPEG, PNG, WEBP, TIFF)", 
@@ -279,43 +230,44 @@ with st.container(border=True):
         if st.button("🔍 Start Full Scan", type="primary"):
             
             # Run prediction
-            final_verdict_str, ela_pil = predict_image_streamlit(pil_img)
+            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated = predict_image_streamlit(pil_img)
 
             st.markdown("---")
             st.header("Final Scan Results")
-            
-            # Display the single, combined verdict
-            # Check for 'REAL' or 'ANOMALY' or 'FAILURE' to determine the alert box color
-            if "ANOMALY" in final_verdict_str or "FAILURE" in final_verdict_str:
-                st.error(final_verdict_str)
-            elif "REAL" in final_verdict_str:
-                st.success(final_verdict_str)
-            else:
-                st.info(final_verdict_str)
-
-
-            st.markdown("---")
             
             # --- OUTPUT DISPLAY ---
             col1, col2 = st.columns(2)
 
             # COLUMN 1: AI GENERATION DETAILS
             with col1:
-                st.subheader("Layer 1: AI Generation Details")
-                st.markdown(f"VGG16-extracted features are passed to the Isolation Forest model to detect feature-space anomalies associated with synthetic content. (Threshold: `{THRESHOLD_IF_ANOMALY:.4f}`)")
-                st.subheader("Input Image")
-                # Image added back into the Layer 1 column for visual consistency with original Gradio app
-                st.image(pil_img, caption="Input Image (for feature analysis)", use_container_width=True)
+                st.subheader("Layer 1: AI Generation Scan")
                 
-
+                # Display Verdict with conditional formatting
+                if is_ai_anomaly:
+                    st.error(verdict_ai)
+                elif "REAL" in verdict_ai:
+                    st.success(verdict_ai)
+                else:
+                    st.info(verdict_ai)
+                
+                st.markdown("**Visual:**")
+                st.image(pil_img, caption="Input Image (VGG16 Features Analyzed)", use_container_width=True)
+                
 
             # COLUMN 2: MANIPULATION CHECK DETAILS
             with col2:
-                st.subheader("Layer 2: Manipulation Check Details")
-                st.markdown(f"Error Level Analysis (ELA) map shows non-uniform compression levels. The Autoencoder measures the reconstruction error to detect tampering. (Threshold: `{THRESHOLD_ELA:.4f}`)")
+                st.subheader("Layer 2: Manipulation Scan")
+                
+                # Display Verdict with conditional formatting
+                if is_manipulated:
+                    st.error(verdict_manipulation)
+                elif "REAL" in verdict_manipulation:
+                    st.success(verdict_manipulation)
+                else:
+                    st.info(verdict_manipulation)
 
-                st.subheader("ELA Analysis Map")
-                st.image(ela_pil, caption="ELA Image (Higher variance/brightness suggests manipulation)", use_container_width=True) 
+                st.markdown("**Visual:**")
+                st.image(ela_pil, caption="ELA Analysis Map", use_container_width=True) 
             
     else:
         st.info("Please upload an image to begin the scan.")
