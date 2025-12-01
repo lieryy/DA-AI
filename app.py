@@ -70,7 +70,7 @@ def load_models():
             feature_extractor = tf.keras.Model(inputs, x)
         except Exception as rebuild_e:
             feature_extractor = None
-
+        
     # C. Load the ELA Autoencoder
     h5_filename = 'model_ela.h5'
     try:
@@ -80,7 +80,10 @@ def load_models():
     except Exception as e:
         model_ela = None
         loading_messages.append(f"ERROR: '{h5_filename}' not found.")
-        
+
+    for msg in loading_messages:
+        st.write(msg)
+
     return clf, feature_extractor, model_ela, loading_messages
 
 clf, feature_extractor, model_ela, loading_feedback = load_models()
