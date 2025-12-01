@@ -168,7 +168,7 @@ def predict_image_streamlit(pil_image):
             # ### NEW CODE: Get the raw Anomaly Score ###
             # Negative = Anomaly, Positive = Real
             raw_score = clf.decision_function(features)[0]
-            confidence = abs(raw_score) # How far from the "border" are we?
+            confidence = raw_score # How far from the "border" are we?
             
             if pred == -1:
                 # We include the score in the verdict text
