@@ -242,7 +242,7 @@ with st.container(border=True):
         st.markdown("### Detection Settings")
         sensitivity = st.slider(
             "AI Detection Sensitivity", 
-            min_value=-0.10, 
+            min_value=0.00, 
             max_value=0.20, 
             value=0.00, 
             step=0.01,
