@@ -32,13 +32,6 @@ def load_models():
     # Initialize containers for feedback
     loading_messages = []
     
-    # DEBUG: Check what files are actually here
-    try:
-        files_in_dir = os.listdir(os.getcwd())
-        loading_messages.append(f"📂 Files in Current Directory: {files_in_dir}")
-    except Exception as e:
-        loading_messages.append(f"Could not list files: {e}")
-    
     # A. Load the Isolation Forest
     # UPDATED FILENAME to bypass Git LFS issues
     joblib_filename = 'if_model.joblib' 
@@ -61,7 +54,7 @@ def load_models():
         loading_messages.append(f"✅ VGG16 Feature Extractor loaded (Full Model).")
     except Exception as e_full:
         # Attempt 2: Load as weights only
-        loading_messages.append(f"⚠️ VGG16 Full Model load failed. Trying weights...")
+        # loading_messages.append(f"⚠️ VGG16 Full Model load failed. Trying weights...")
         try:
             base_model = tf.keras.applications.VGG16(weights=None, include_top=False, input_shape=(128, 128, 3))
             base_model.load_weights(vgg_filename) # Load local weights
@@ -74,7 +67,7 @@ def load_models():
             loading_messages.append(f"✅ VGG16 loaded via Weights.")
         except Exception as e_weights:
             # Fallback to downloading
-            loading_messages.append(f"⚠️ Local VGG16 error. Downloading ImageNet weights...")
+            # loading_messages.append(f"⚠️ Local VGG16 error. Downloading ImageNet weights...")
             try:
                 base_model = tf.keras.applications.VGG16(weights='imagenet', include_top=False, input_shape=(128, 128, 3))
                 inputs = tf.keras.Input(shape=(128, 128, 3))
@@ -101,17 +94,18 @@ def load_models():
 
 clf, feature_extractor, model_ela, loading_feedback = load_models()
 
-# --- DEBUG DISPLAY ---
-with st.expander("🔍 System Status & Errors (Open to Debug)", expanded=True):
-    for msg in loading_feedback:
-        if "✅" in msg:
-            st.success(msg)
-        elif "⚠️" in msg:
-            st.warning(msg)
-        elif "📂" in msg:
-            st.info(msg) 
-        else:
-            st.error(msg)
+# --- NOTE: DEBUG DISPLAY REMOVED FOR CLEAN UI ---
+# If you ever need to debug again, uncomment the lines below:
+# with st.expander("🔍 System Status & Errors (Open to Debug)", expanded=True):
+#     for msg in loading_feedback:
+#         if "✅" in msg:
+#             st.success(msg)
+#         elif "⚠️" in msg:
+#             st.warning(msg)
+#         elif "📂" in msg:
+#             st.info(msg) 
+#         else:
+#             st.error(msg)
 
 
 # ==========================================
