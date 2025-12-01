@@ -253,7 +253,7 @@ with st.container(border=True):
         if st.button("🔍 Start Full Scan", type="primary"):
             
             # Run prediction (Now receiving heatmap_pil too)
-            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil = predict_image_streamlit(pil_img)
+            verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil = predict_image_streamlit(pil_img, sensitivity)
 
             st.markdown("---")
             st.header("Final Scan Results")
