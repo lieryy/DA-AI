@@ -140,7 +140,7 @@ def preprocess_ela(ela_pil):
 # 4. MAIN PREDICTION LOGIC
 # ==========================================
 
-def predict_image_streamlit(pil_image):
+def predict_image_streamlit(pil_image, sensitivity_threshold):
     
     # Initialize default results
     verdict_ai = "Waiting..."
@@ -163,19 +163,16 @@ def predict_image_streamlit(pil_image):
             
         with st.spinner('Running Isolation Forest Anomaly Detection...'):
             # 2. Predict Verdict and Score
-            pred = clf.predict(features)[0]
-            
-            # ### NEW CODE: Get the raw Anomaly Score ###
-            # Negative = Anomaly, Positive = Real
+            # Get the raw score (Negative = Anomaly, Positive = Real)
             raw_score = clf.decision_function(features)[0]
-            confidence = raw_score # How far from the "border" are we?
             
-            if pred == -1:
-                # We include the score in the verdict text
-                verdict_ai = f"⚠️ ANOMALY DETECTED (Possible AI)\nConfidence Score: {confidence:.4f}"
+            # Use the slider value to decide! 
+            # If score is LOWER than your slider, it's an Anomaly.
+            if raw_score < sensitivity_threshold:
+                verdict_ai = f"⚠️ ANOMALY DETECTED (Possible AI)\nScore: {raw_score:.4f} (Threshold: {sensitivity_threshold})"
                 is_ai_anomaly = True
             else:
-                verdict_ai = f"✅ REAL (Matches Human Features)\nConfidence Score: {confidence:.4f}"
+                verdict_ai = f"✅ REAL (Matches Human Features)\nScore: {raw_score:.4f} (Safe)"
                 is_ai_anomaly = False
 
     # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
@@ -241,6 +238,16 @@ with st.container(border=True):
         
         # Display Preview
         st.image(pil_img, caption="Preview: Input Image Ready for Scan", use_container_width=True) 
+
+        st.markdown("### Detection Settings")
+        sensitivity = st.slider(
+            "AI Detection Sensitivity", 
+            min_value=-0.10, 
+            max_value=0.20, 
+            value=0.00, 
+            step=0.01,
+            help="Increase this value to catch 'subtle' AI images. Default is 0.00."
+        )
 
         # Button is placed next to the image preview
         if st.button("🔍 Start Full Scan", type="primary"):
