@@ -32,8 +32,16 @@ def load_models():
     # Initialize containers for feedback
     loading_messages = []
     
+    # DEBUG: Check what files are actually here
+    try:
+        files_in_dir = os.listdir(os.getcwd())
+        loading_messages.append(f"📂 Files in Current Directory: {files_in_dir}")
+    except Exception as e:
+        loading_messages.append(f"Could not list files: {e}")
+    
     # A. Load the Isolation Forest
-    joblib_filename = 'isolation_forest.joblib'
+    # UPDATED FILENAME to bypass Git LFS issues
+    joblib_filename = 'if_model.joblib' 
     try:
         current_dir = os.getcwd()
         full_path = os.path.join(current_dir, joblib_filename)
@@ -42,37 +50,42 @@ def load_models():
         loading_messages.append(f"✅ Isolation Forest loaded from: {full_path}")
     except Exception as e:
         clf = None
-        # I added {e} back here so you can see the REAL error
         loading_messages.append(f"❌ ISOLATION FOREST ERROR: {e}")
 
     # B. Load VGG16 Feature Extractor
     vgg_filename = 'vgg16_extractor.h5'
     try:
         full_path = os.path.join(os.getcwd(), vgg_filename)
-        # We rebuild architecture to ensure compatibility
-        base_model = tf.keras.applications.VGG16(weights=None, include_top=False, input_shape=(128, 128, 3))
-        base_model.load_weights(vgg_filename) # Load local weights
-        
-        inputs = tf.keras.Input(shape=(128, 128, 3))
-        x = tf.keras.applications.vgg16.preprocess_input(inputs)
-        x = base_model(x, training=False)
-        x = tf.keras.layers.GlobalAveragePooling2D()(x)
-        feature_extractor = tf.keras.Model(inputs, x)
-        loading_messages.append(f"✅ VGG16 Feature Extractor loaded.")
-    except Exception as e:
-        # Fallback to downloading
-        loading_messages.append(f"⚠️ Local VGG16 error: {e}. Downloading ImageNet weights...")
+        # Attempt 1: Load as full model
+        feature_extractor = tf.keras.models.load_model(vgg_filename)
+        loading_messages.append(f"✅ VGG16 Feature Extractor loaded (Full Model).")
+    except Exception as e_full:
+        # Attempt 2: Load as weights only
+        loading_messages.append(f"⚠️ VGG16 Full Model load failed. Trying weights...")
         try:
-            base_model = tf.keras.applications.VGG16(weights='imagenet', include_top=False, input_shape=(128, 128, 3))
+            base_model = tf.keras.applications.VGG16(weights=None, include_top=False, input_shape=(128, 128, 3))
+            base_model.load_weights(vgg_filename) # Load local weights
+            
             inputs = tf.keras.Input(shape=(128, 128, 3))
             x = tf.keras.applications.vgg16.preprocess_input(inputs)
             x = base_model(x, training=False)
             x = tf.keras.layers.GlobalAveragePooling2D()(x)
             feature_extractor = tf.keras.Model(inputs, x)
-            loading_messages.append("✅ VGG16 (ImageNet) successfully built.")
-        except Exception as rebuild_e:
-            feature_extractor = None
-            loading_messages.append(f"❌ VGG16 CRITICAL FAILURE: {rebuild_e}")
+            loading_messages.append(f"✅ VGG16 loaded via Weights.")
+        except Exception as e_weights:
+            # Fallback to downloading
+            loading_messages.append(f"⚠️ Local VGG16 error. Downloading ImageNet weights...")
+            try:
+                base_model = tf.keras.applications.VGG16(weights='imagenet', include_top=False, input_shape=(128, 128, 3))
+                inputs = tf.keras.Input(shape=(128, 128, 3))
+                x = tf.keras.applications.vgg16.preprocess_input(inputs)
+                x = base_model(x, training=False)
+                x = tf.keras.layers.GlobalAveragePooling2D()(x)
+                feature_extractor = tf.keras.Model(inputs, x)
+                loading_messages.append("✅ VGG16 (ImageNet) successfully built.")
+            except Exception as rebuild_e:
+                feature_extractor = None
+                loading_messages.append(f"❌ VGG16 CRITICAL FAILURE: {rebuild_e}")
 
     # C. Load the ELA Autoencoder
     h5_filename = 'model_ela.h5'
@@ -88,15 +101,15 @@ def load_models():
 
 clf, feature_extractor, model_ela, loading_feedback = load_models()
 
-# --- DEBUG DISPLAY (THIS IS THE MOST IMPORTANT PART) ---
-# This will print the error log at the top of your website.
-# Once fixed, you can comment this out.
+# --- DEBUG DISPLAY ---
 with st.expander("🔍 System Status & Errors (Open to Debug)", expanded=True):
     for msg in loading_feedback:
         if "✅" in msg:
             st.success(msg)
         elif "⚠️" in msg:
             st.warning(msg)
+        elif "📂" in msg:
+            st.info(msg) 
         else:
             st.error(msg)
 
@@ -167,7 +180,6 @@ def predict_image_streamlit(pil_image):
             features = feature_extractor.predict(img_batch_vgg, verbose=0)
             
             # 2. Predict using Isolation Forest
-            # Isolation Forest standard: 1 is Inlier (Real), -1 is Outlier (Anomaly)
             pred_label = clf.predict(features)[0]
             
             # Optional: Get score for extra detail
