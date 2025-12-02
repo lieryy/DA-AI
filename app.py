@@ -43,7 +43,7 @@ def load_models():
         full_path = os.path.join(current_dir, joblib_filename)
         
         clf = joblib.load(joblib_filename)
-        loading_messages.append(f"✅ Isolation Forest loaded from: {full_path}")
+        loading_messages.append(f"Isolation Forest loaded from: {full_path}")
     except Exception as e:
         clf = None
         loading_messages.append(f"   ERROR: '{joblib_filename}' not found. AI detection will be skipped. Tried path: {full_path}")
@@ -57,7 +57,7 @@ def load_models():
         loading_messages.append(f"VGG16 Feature Extractor loaded from: {full_path}")
     except Exception as e:
         # Fallback to re-building if the file is missing/corrupt
-        loading_messages.append(f"⚠️ WARNING: '{vgg_filename}' not found/loaded. Re-building VGG16 from Keras defaults.")
+        loading_messages.append(f"WARNING: '{vgg_filename}' not found/loaded. Re-building VGG16 from Keras defaults.")
         try:
             base_model = tf.keras.applications.VGG16(
                 weights='imagenet', 
@@ -171,14 +171,14 @@ def predict_image_streamlit(pil_image):
             # ### NEW CODE: Get the raw Anomaly Score ###
             # Negative = Anomaly, Positive = Real
             raw_score = clf.decision_function(features)[0]
-            confidence = abs(raw_score) # How far from the "border" are we?
+            confidence = raw_score # How far from the "border" are we?
             
             if pred == -1:
                 # We include the score in the verdict text
-                verdict_ai = f"⚠️ ANOMALY DETECTED (Possible AI)\nConfidence Score: {confidence:.4f}"
+                verdict_ai = f"ANOMALY DETECTED (Possible AI)\nConfidence Score: {confidence:.4f}"
                 is_ai_anomaly = True
             else:
-                verdict_ai = f"✅ REAL (Matches Human Features)\nConfidence Score: {confidence:.4f}"
+                verdict_ai = f"REAL (Matches Human Features)\nConfidence Score: {confidence:.4f}"
                 is_ai_anomaly = False
 
     # --- TEST 2: MANIPULATION CHECK (ELA + Autoencoder) ---
@@ -207,10 +207,10 @@ def predict_image_streamlit(pil_image):
                 # ### END NEW CODE ###
                 
                 if error_ela > THRESHOLD_ELA:
-                    verdict_manipulation = f"⚠️ ANOMALY DETECTED (Manipulated)\nError: {error_ela:.5f}"
+                    verdict_manipulation = f"ANOMALY DETECTED (Manipulated)\nError: {error_ela:.5f}"
                     is_manipulated = True
                 else:
-                    verdict_manipulation = f"✅ REAL (Original Compression)\nError: {error_ela:.5f}"
+                    verdict_manipulation = f"REAL (Original Compression)\nError: {error_ela:.5f}"
                     is_manipulated = False
         
     # Return the heatmap as well
@@ -246,7 +246,7 @@ with st.container(border=True):
         st.image(pil_img, caption="Preview: Input Image Ready for Scan", use_container_width=True) 
 
         # Button is placed next to the image preview
-        if st.button("🔍 Start Full Scan", type="primary"):
+        if st.button("Start Full Scan", type="primary"):
             
             # Run prediction (Now receiving heatmap_pil too)
             verdict_ai, verdict_manipulation, ela_pil, is_ai_anomaly, is_manipulated, heatmap_pil = predict_image_streamlit(pil_img)
@@ -296,6 +296,15 @@ with st.container(border=True):
                 
                 with tab2:
                     st.image(heatmap_pil, caption="Glowing Areas indicate Manipulation", use_container_width=True)
-            
+
+            st.markdown("---")
+            st.header("Overall Verdict")
+
+            if is_ai_anomaly or is_manipulated:
+                st.error("RESULT: ANOMALY DETECTED")
+                st.markdown("**System Assessment:** The image is likely **FAKE** or **MANIPULATED**.")
+            else:
+                st.success("RESULT: REAL")
+                st.markdown("**System Assessment:** The image appears **REAL**.")   
     else:
         st.info("Please upload an image to begin the scan.")
